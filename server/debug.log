@@ -1,0 +1,8 @@
+[dotenv@17.2.4] injecting env (2) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+Connecting to MongoDB...
+MongoDB Connected: ac-gw19ugq-shard-00-00.upfmlho.mongodb.net
+Server running on port 5000
+User connected: 5KZnwVaaZGMceW--AAAC
+User connected: s29jEzlHp2lJ7zDoAAAD
+User connected: F1Df00tAkXPSdcGRAAAF
+User connected: _NCQtNqcRtoXwuBXAAAI
