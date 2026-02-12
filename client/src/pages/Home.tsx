@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { v4 as uuidv4 } from 'uuid';
 import { FaYoutube, FaMagic, FaPlay } from 'react-icons/fa';
 
 const Home: React.FC = () => {

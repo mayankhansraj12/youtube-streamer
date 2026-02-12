@@ -6,7 +6,7 @@ import SimplePeer from 'simple-peer';
 import { useSocket } from '../context/SocketContext';
 import {
     FaPlay, FaPause, FaMicrophone, FaMicrophoneSlash,
-    FaVideo, FaExpand, FaCompress, FaPaperPlane, FaTimes
+    FaVideo, FaExpand, FaCompress, FaPaperPlane
 } from 'react-icons/fa';
 
 // Polyfill for SimplePeer
@@ -271,7 +271,7 @@ const Room: FC = () => {
                                 }
                             });
 
-                            p.on('error', err => { /* handle peer error silently or log to analytics */ });
+                            p.on('error', _err => { /* handle peer error silently or log to analytics */ });
 
                             const peerData = {
                                 peerId: user.socketId,
