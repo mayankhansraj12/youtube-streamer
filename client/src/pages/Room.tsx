@@ -81,7 +81,10 @@ const NativeYouTubePlayer = ({
                 videoId: videoId,
                 playerVars: {
                     'playsinline': 1, 'controls': 0, 'disablekb': 1, 'rel': 0,
-                    'showinfo': 0, 'modestbranding': 1, 'origin': window.location.origin
+                    'modestbranding': 1, 'origin': window.location.origin,
+                    'iv_load_policy': 3, // Hide annotations
+                    'loop': 1, // Hack to minimize related videos
+                    'playlist': videoId
                 },
                 events: {
                     'onReady': (event: any) => { if (playing) event.target.playVideo(); },
@@ -489,19 +492,19 @@ const Room: FC = () => {
     };
 
     return (
-        <div className="flex h-screen bg-[#0f0f0f] text-white font-sans overflow-hidden">
+        <div className="flex flex-col lg:flex-row h-screen bg-[#0f0f0f] text-white font-sans overflow-hidden">
             {/* LIFT: Main Content */}
-            <div className="flex-1 flex flex-col relative transition-all duration-300">
+            <div className="w-full lg:flex-1 h-[40vh] lg:h-auto flex flex-col relative transition-all duration-300 flex-shrink-0">
                 {/* Header */}
-                <header className="h-20 flex items-center justify-between px-8 absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
-                    <div className="pointer-events-auto flex items-center gap-4 bg-white/5 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 shadow-lg">
-                        <div className="bg-gradient-to-tr from-purple-600 to-pink-600 p-2 rounded-full shadow-[0_0_15px_rgba(168,85,247,0.4)]">
-                            <FaVideo className="text-white text-sm" />
+                <header className="h-16 lg:h-20 flex items-center justify-between px-4 lg:px-8 absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+                    <div className="pointer-events-auto flex items-center gap-2 lg:gap-4 bg-white/5 backdrop-blur-md px-3 lg:px-4 py-1.5 lg:py-2 rounded-full border border-white/10 shadow-lg scale-90 lg:scale-100 origin-left">
+                        <div className="bg-gradient-to-tr from-purple-600 to-pink-600 p-1.5 lg:p-2 rounded-full shadow-[0_0_15px_rgba(168,85,247,0.4)]">
+                            <FaVideo className="text-white text-xs lg:text-sm" />
                         </div>
-                        <span className="font-bold tracking-wide">Room <span className="text-purple-400 font-mono">{roomId}</span></span>
+                        <span className="font-bold tracking-wide text-xs lg:text-base">Room <span className="text-purple-400 font-mono">{roomId}</span></span>
                     </div>
 
-                    {/* URL Bar */}
+                    {/* URL Bar - Hidden on mobile, visible on desktop */}
                     <div className="pointer-events-auto hidden md:flex items-center gap-2 bg-black/40 backdrop-blur-md p-1.5 rounded-2xl border border-white/10 w-96 max-w-lg shadow-xl hover:border-purple-500/30 transition-colors">
                         <input
                             className="flex-1 bg-transparent border-none text-sm px-4 focus:outline-none placeholder-gray-500"
@@ -517,20 +520,20 @@ const Room: FC = () => {
 
                     <div className="pointer-events-auto flex items-center gap-2">
                         {roomOwner === username ? (
-                            <button className="bg-red-500/10 hover:bg-red-600 text-red-500 hover:text-white px-4 py-2 rounded-lg transition-all border border-red-500/20 text-sm font-semibold" onClick={() => setShowDeleteModal(true)}>
-                                Delete Room
+                            <button className="bg-red-500/10 hover:bg-red-600 text-red-500 hover:text-white px-3 lg:px-4 py-1.5 lg:py-2 rounded-lg transition-all border border-red-500/20 text-xs lg:text-sm font-semibold" onClick={() => setShowDeleteModal(true)}>
+                                Delete
                             </button>
                         ) : (
-                            <button className="bg-white/5 hover:bg-red-500/20 text-gray-300 hover:text-red-400 px-4 py-2 rounded-lg transition-all border border-white/10 text-sm font-semibold" onClick={() => setShowLeaveModal(true)}>
-                                Leave Room
+                            <button className="bg-white/5 hover:bg-red-500/20 text-gray-300 hover:text-red-400 px-3 lg:px-4 py-1.5 lg:py-2 rounded-lg transition-all border border-white/10 text-xs lg:text-sm font-semibold" onClick={() => setShowLeaveModal(true)}>
+                                Leave
                             </button>
                         )}
                     </div>
                 </header>
 
                 {/* Video Stage */}
-                <div className="flex-1 flex items-center justify-center p-6 lg:p-10 relative" ref={videoContainerRef}>
-                    <div className="w-full h-full max-w-6xl aspect-video bg-black relative rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/5 ring-1 ring-white/5 group">
+                <div className="flex-1 flex items-center justify-center p-2 lg:p-10 relative bg-black/50" ref={videoContainerRef}>
+                    <div className="w-full h-full max-w-6xl aspect-video bg-black relative rounded-xl lg:rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/5 ring-1 ring-white/5 group">
                         {videoId ? (
                             <>
                                 <NativeYouTubePlayer
@@ -539,7 +542,16 @@ const Room: FC = () => {
                                     onDuration={setDuration} onStateChange={handlePlayerStateChange}
                                     playerInstanceRef={playerInstanceRef}
                                 />
-                                <div className="absolute inset-0 z-10" onClick={handleTogglePlay}></div>
+                                <div
+                                    className={`absolute inset-0 z-10 flex items-center justify-center transition-all duration-300 ${!playing ? 'bg-black/60 backdrop-blur-sm group-hover:bg-black/40' : 'bg-transparent'}`}
+                                    onClick={handleTogglePlay}
+                                >
+                                    {!playing && (
+                                        <div className="bg-white/10 p-6 rounded-full backdrop-blur-md border border-white/20 shadow-xl group-hover:scale-110 transition-transform">
+                                            <FaPlay size={40} className="text-white ml-2" />
+                                        </div>
+                                    )}
+                                </div>
                                 <ControlBar
                                     playing={playing} currentTime={currentTime} duration={duration}
                                     onTogglePlay={handleTogglePlay} onSeek={handleSeek} onSeekEnd={handleSeekEnd}
@@ -549,27 +561,39 @@ const Room: FC = () => {
                             </>
                         ) : (
                             <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">
-                                <div className="p-6 rounded-full bg-white/5 mb-4 animate-pulse"><FaVideo size={40} className="opacity-20" /></div>
-                                <p className="text-gray-400 font-light">Waiting for video...</p>
+                                <div className="p-4 lg:p-6 rounded-full bg-white/5 mb-4 animate-pulse"><FaVideo size={30} className="opacity-20 lg:w-10 lg:h-10" /></div>
+                                <p className="text-gray-400 font-light text-sm lg:text-base">Waiting for video...</p>
+                                {/* Mobile Input for Video if URL Bar is hidden */}
+                                <div className="md:hidden mt-4 w-3/4 flex gap-2">
+                                    <input
+                                        className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                                        placeholder="Paste Link..."
+                                        value={inputUrl}
+                                        onChange={(e) => setInputUrl(e.target.value)}
+                                    />
+                                    <button onClick={submitUrl} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-xs font-bold">
+                                        GO
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
                 </div>
 
-                {/* Bottom Bar: Mic Controls */}
-                <div className="h-20 bg-[#0a0a0a]/50 backdrop-blur-sm flex items-center justify-center border-t border-white/5">
+                {/* Bottom Bar: Mic Controls - Compact on mobile */}
+                <div className="h-14 lg:h-20 bg-[#0a0a0a]/50 backdrop-blur-sm flex items-center justify-center border-t border-white/5">
                     <button
                         onClick={handleToggleMute}
-                        className={`flex items-center gap-3 px-6 py-3 rounded-full border transition-all ${muted ? 'bg-red-500/20 border-red-500/50 text-red-500' : 'bg-green-500/20 border-green-500/50 text-green-400 hover:bg-green-500/30'}`}
+                        className={`flex items-center gap-2 lg:gap-3 px-4 lg:px-6 py-2 lg:py-3 rounded-full border transition-all ${muted ? 'bg-red-500/20 border-red-500/50 text-red-500' : 'bg-green-500/20 border-green-500/50 text-green-400 hover:bg-green-500/30'}`}
                     >
-                        {muted ? <FaMicrophoneSlash /> : <FaMicrophone />}
-                        <span className="font-semibold text-sm">{muted ? 'Unmuted' : 'Muted'} (Self)</span>
+                        {muted ? <FaMicrophoneSlash size={14} /> : <FaMicrophone size={14} />}
+                        <span className="font-semibold text-xs lg:text-sm">{muted ? 'Unmuted' : 'Muted'}</span>
                     </button>
                 </div>
             </div>
 
             {/* Sidebar */}
-            <div className="w-[380px] bg-[#121212] border-l border-white/10 flex flex-col shadow-2xl z-40">
+            <div className="w-full lg:w-[380px] flex-1 lg:flex-none h-auto bg-[#121212] border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col shadow-2xl z-40">
                 <div className="flex text-sm font-semibold border-b border-white/5">
                     <button
                         className={`flex-1 py-5 transition-colors ${sidebarTab === 'chat' ? 'text-white border-b-2 border-purple-500 bg-white/5' : 'text-gray-500 hover:text-gray-300'}`}

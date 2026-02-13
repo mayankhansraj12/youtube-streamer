@@ -29,17 +29,17 @@ const Home: React.FC = () => {
             </div>
 
             <div className="z-10 w-full max-w-md">
-                <div className="text-center mb-10">
-                    <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-purple-600 to-pink-600 rounded-2xl shadow-2xl shadow-purple-500/30 mb-6 transform rotate-3 hover:rotate-6 transition-transform">
-                        <FaYoutube className="text-4xl text-white" />
+                <div className="text-center mb-8 lg:mb-10">
+                    <div className="inline-flex items-center justify-center w-16 h-16 lg:w-20 lg:h-20 bg-gradient-to-br from-purple-600 to-pink-600 rounded-2xl shadow-2xl shadow-purple-500/30 mb-4 lg:mb-6 transform rotate-3 hover:rotate-6 transition-transform">
+                        <FaYoutube className="text-3xl lg:text-4xl text-white" />
                     </div>
-                    <h1 className="text-5xl font-extrabold tracking-tight mb-2 bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
+                    <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight mb-2 bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
                         Stream<span className="text-purple-500">Sync</span>
                     </h1>
-                    <p className="text-gray-400 font-medium">Watch together, wherever you are.</p>
+                    <p className="text-gray-400 font-medium text-sm lg:text-base">Watch together, wherever you are.</p>
                 </div>
 
-                <div className="bg-[#1a1a1a]/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl border border-white/10 ring-1 ring-white/5">
+                <div className="bg-[#1a1a1a]/80 backdrop-blur-xl p-6 lg:p-8 rounded-3xl shadow-2xl border border-white/10 ring-1 ring-white/5">
                     <div className="space-y-6">
                         <div>
                             <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 ml-1">Display Name</label>
