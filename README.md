@@ -2,7 +2,8 @@
 
 **StreamSync** is a modern, real-time web application that allows users to watch YouTube videos together perfectly synchronized, while chatting via voice and text. Built for low-latency and high engagement.
 
-[**StreamSync Live Demo**](https://streamsynclive.vercel.app)
+🔗 **Live Demo:** [https://streamsynclive.vercel.app](https://streamsynclive.vercel.app)
+
 
 ![StreamSync Screenshot](screenshot.png)
 
