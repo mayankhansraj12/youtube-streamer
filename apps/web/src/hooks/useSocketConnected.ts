@@ -1,8 +1,8 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import type { Socket } from 'socket.io-client';
+import type { RoomSocket } from '../lib/socket';
 
 /** Tracks whether the realtime connection is currently open. */
-export function useSocketConnected(socket: Socket | null): boolean {
+export function useSocketConnected(socket: RoomSocket | null): boolean {
   const subscribe = useCallback(
     (onChange: () => void) => {
       if (!socket) return () => undefined;

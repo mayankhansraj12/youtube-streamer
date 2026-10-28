@@ -1,8 +1,8 @@
 import { createContext, useContext } from 'react';
-import type { Socket } from 'socket.io-client';
+import type { RoomSocket } from '../lib/socket';
 
-export const SocketContext = createContext<Socket | null>(null);
+export const SocketContext = createContext<RoomSocket | null>(null);
 
-export function useSocket(): Socket | null {
+export function useSocket(): RoomSocket | null {
   return useContext(SocketContext);
 }

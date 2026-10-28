@@ -1,70 +1,23 @@
-export interface AuthUser {
-  id: string;
-  username: string;
-  email: string | null;
-  createdAt?: string;
-}
+import type { ChatMessage, PublicUser, SignalRelay } from '@streamsync/shared';
 
-export interface Participant {
-  socketId: string;
-  userId: string;
-  username: string;
-  muted: boolean;
-  joinedAt: number;
-}
+// Room, playback and presence shapes come from the contract shared with the API.
+export type {
+  ChatMessage,
+  MediaSource,
+  Participant,
+  PlaybackState,
+  PresenceUpdate,
+  RoomSnapshot,
+  RoomSummary,
+} from '@streamsync/shared';
 
-export interface ChatMessage {
-  id: string;
-  userId: string;
-  username: string;
-  text: string;
-  createdAt: number;
-}
+/** The signed-in account as the API returns it. */
+export type AuthUser = PublicUser;
 
 /** A chat-panel entry: either a participant's message or a system notice such as "Ana joined". */
 export type ChatItem =
   | ({ kind: 'message' } & ChatMessage)
   | { kind: 'system'; id: string; text: string; createdAt: number };
 
-export type MediaSource =
-  | { kind: 'youtube'; url: string; youtubeId: string; startAt: number }
-  | { kind: 'media'; url: string; mediaType: 'audio' | 'video'; format: 'native' | 'hls'; startAt: number };
-
-export interface PlaybackState {
-  source: MediaSource | null;
-  playing: boolean;
-  /** Seconds into the media at the moment `updatedAt` was recorded. */
-  position: number;
-  /** Server epoch milliseconds. Compare with the server clock, not the local one. */
-  updatedAt: number;
-}
-
-export interface RoomSnapshot {
-  roomId: string;
-  name: string;
-  owner: string;
-  ownerId: string;
-  participants: Participant[];
-  messages: ChatMessage[];
-  playback: PlaybackState;
-  serverTime: number;
-}
-
-export interface PresenceUpdate {
-  participants: Participant[];
-  event?: { type: 'joined' | 'left'; participant: Participant };
-}
-
-export interface RoomSummary {
-  roomId: string;
-  name: string;
-  owner: string;
-  ownerId: string;
-  createdAt: string;
-}
-
-export interface SignalPayload {
-  from: string;
-  description?: RTCSessionDescriptionInit;
-  candidate?: RTCIceCandidateInit;
-}
+/** A WebRTC signal as relayed by the server to this client. */
+export type SignalPayload = SignalRelay;

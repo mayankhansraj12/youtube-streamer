@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Socket } from 'socket.io-client';
+import type { RoomSocket } from '../lib/socket';
 import { LIMITS } from '../config';
 import { estimateClockOffset } from '../lib/playbackClock';
 import { request, SocketRequestError } from '../lib/socket';
-import type { ChatItem, ChatMessage, Participant, PlaybackState, PresenceUpdate, RoomSnapshot } from '../types';
+import type { ChatItem, ChatMessage, Participant, PlaybackState, PresenceUpdate } from '../types';
 import { useLatest } from './useLatest';
 
 const MAX_CHAT_ITEMS = 300;
@@ -15,13 +15,8 @@ export interface RoomIdentity {
   ownerId: string;
 }
 
-interface JoinReply {
-  selfId: string;
-  snapshot: RoomSnapshot;
-}
-
 export interface RoomSessionOptions {
-  socket: Socket | null;
+  socket: RoomSocket | null;
   roomId: string;
   onRoomEnded: (reason: string) => void;
   onKicked: () => void;
@@ -73,7 +68,7 @@ export function useRoomSession({
     const join = async () => {
       const sentAt = Date.now();
       try {
-        const reply = await request<JoinReply>(socket, 'room:join', { roomId, muted: true });
+        const reply = await request(socket, 'room:join', { roomId, muted: true });
         if (!active) return;
 
         const { snapshot } = reply;
@@ -129,7 +124,8 @@ export function useRoomSession({
       socket.off('playback:state', handlePlaybackState);
       socket.off('room:ended', handleRoomEnded);
       socket.off('room:kicked', handleKicked);
-      if (socket.connected) socket.emit('room:leave');
+      // Leaving on unmount is fire-and-forget, so the acknowledgement is ignored.
+      if (socket.connected) socket.emit('room:leave', () => undefined);
     };
   }, [socket, roomId, endedRef, kickedRef, joinFailedRef]);
 
@@ -152,7 +148,7 @@ export function useRoomSession({
   const loadSource = useCallback(
     async (url: string) => {
       if (!socket?.connected) throw OFFLINE_ERROR();
-      const reply = await request<{ playback: PlaybackState }>(socket, 'playback:set-source', { url });
+      const reply = await request(socket, 'playback:set-source', { url });
       setPlayback(reply.playback);
     },
     [socket]
@@ -162,7 +158,7 @@ export function useRoomSession({
     (playing: boolean, position: number) => {
       if (!socket?.connected) return;
       setPlayback((previous) => (previous ? { ...previous, playing, position, updatedAt: serverNow() } : previous));
-      request<{ playback: PlaybackState }>(socket, 'playback:control', { playing, position })
+      request(socket, 'playback:control', { playing, position })
         .then((reply) => setPlayback(reply.playback))
         .catch((error: unknown) => {
           actionErrorRef.current(error instanceof Error ? error.message : 'Playback could not be updated.');

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Socket } from 'socket.io-client';
+import type { RoomSocket } from '../lib/socket';
 import { ICE_SERVERS } from '../config';
 import { VoiceMesh } from '../lib/voiceMesh';
 
 interface VoiceMeshInput {
-  socket: Socket | null;
+  socket: RoomSocket | null;
   selfId: string | null;
   remoteIds: string[];
   localTrack: MediaStreamTrack | null;

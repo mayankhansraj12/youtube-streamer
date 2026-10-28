@@ -1,4 +1,5 @@
-import type { Socket } from 'socket.io-client';
+import type { IceCandidatePayload, SessionDescriptionPayload } from '@streamsync/shared';
+import type { RoomSocket } from './socket';
 import type { SignalPayload } from '../types';
 
 export interface VoiceMeshEvents {
@@ -8,7 +9,7 @@ export interface VoiceMeshEvents {
 }
 
 export interface VoiceMeshOptions {
-  socket: Socket;
+  socket: RoomSocket;
   selfId: string;
   iceServers: RTCIceServer[];
   events: VoiceMeshEvents;
@@ -25,6 +26,16 @@ interface PeerLink {
   queue: Promise<void>;
 }
 
+/** The wire form of a local ICE candidate, as the API relays it. */
+function toCandidatePayload(candidate: RTCIceCandidate): IceCandidatePayload {
+  return { candidate: candidate.candidate, sdpMid: candidate.sdpMid, sdpMLineIndex: candidate.sdpMLineIndex };
+}
+
+/** The wire form of a local session description, as the API relays it. */
+function toDescriptionPayload(description: RTCSessionDescription): SessionDescriptionPayload {
+  return { type: description.type, sdp: description.sdp };
+}
+
 /**
  * Full-mesh voice connections built on native WebRTC. Signals travel through the room socket
  * and are relayed by the server. Negotiation follows the "perfect negotiation" pattern from
@@ -33,7 +44,7 @@ interface PeerLink {
  * per peer, and a local offer that is still being created is allowed to finish first.
  */
 export class VoiceMesh {
-  private readonly socket: Socket;
+  private readonly socket: RoomSocket;
   private readonly selfId: string;
   private readonly iceServers: RTCIceServer[];
   private readonly events: VoiceMeshEvents;
@@ -97,7 +108,7 @@ export class VoiceMesh {
     this.links.set(remoteId, link);
 
     connection.onicecandidate = ({ candidate }) => {
-      if (candidate) this.socket.emit('rtc:signal', { to: remoteId, candidate: candidate.toJSON() });
+      if (candidate) this.socket.emit('rtc:signal', { to: remoteId, candidate: toCandidatePayload(candidate) });
     };
 
     connection.onnegotiationneeded = () => {
@@ -133,7 +144,7 @@ export class VoiceMesh {
     try {
       await link.connection.setLocalDescription();
       const local = link.connection.localDescription;
-      if (local) this.socket.emit('rtc:signal', { to: remoteId, description: local.toJSON() });
+      if (local) this.socket.emit('rtc:signal', { to: remoteId, description: toDescriptionPayload(local) });
     } catch (error) {
       console.warn('Could not start a voice connection', error);
     } finally {
@@ -163,7 +174,7 @@ export class VoiceMesh {
       if (description.type === 'offer') {
         await connection.setLocalDescription();
         const local = connection.localDescription;
-        if (local) this.socket.emit('rtc:signal', { to: payload.from, description: local.toJSON() });
+        if (local) this.socket.emit('rtc:signal', { to: payload.from, description: toDescriptionPayload(local) });
       }
       return;
     }

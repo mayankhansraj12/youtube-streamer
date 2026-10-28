@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import type { Socket } from 'socket.io-client';
+import type { RoomSocket } from '../lib/socket';
 import type { DeckSettings } from '../lib/deckSettings';
 import type { Participant } from '../types';
 import { useAudioLevels, type LevelReading } from './useAudioLevels';
@@ -9,7 +9,7 @@ import { useVoiceMesh } from './useVoiceMesh';
 export const SELF_LEVEL_ID = 'self';
 
 interface VoiceChatInput {
-  socket: Socket | null;
+  socket: RoomSocket | null;
   selfId: string | null;
   participants: Participant[];
   deck: DeckSettings;

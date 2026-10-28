@@ -26,13 +26,8 @@ function readIceServers(raw: string | undefined): RTCIceServer[] {
 /** STUN/TURN servers used for voice connections. Override with VITE_ICE_SERVERS for restrictive networks. */
 export const ICE_SERVERS: RTCIceServer[] = readIceServers(import.meta.env.VITE_ICE_SERVERS);
 
-/** Mirrors the server limits in server/lib/limits.js. */
-export const LIMITS = {
-  maxMessageLength: 500,
-  maxRoomNameLength: 60,
-  maxUrlLength: 2048,
-  minPasswordLength: 8,
-} as const;
+/** Size and length limits, shared with the API so both sides enforce the same values. */
+export { LIMITS } from '@streamsync/shared';
 
 export const SYNC = {
   /** Allowed gap between a player and the server timeline before we seek to correct it. */
