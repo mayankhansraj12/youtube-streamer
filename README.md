@@ -84,30 +84,32 @@ flowchart LR
   IO <-->|"shared adapter"| Redis
 ```
 
-- The **client** is a single-page application. It holds the session token, plays media through a common player interface, and runs one WebRTC connection per remote participant.
-- The **API** handles accounts and room lookup over REST. Every socket must present a valid session token during the handshake.
+- The **client** (`apps/web`) is a single-page application. It holds the session token, plays media through a common player interface, and runs one WebRTC connection per remote participant.
+- The **API** (`apps/api`) handles accounts and room lookup over REST. Every socket must present a valid session token during the handshake.
 - The **Socket.IO server** owns the realtime room protocol. It keeps presence derived from live sockets, stores chat history and the playback timeline in MongoDB, and relays WebRTC signalling between sockets in the same room.
+- **`@streamsync/shared`** (`packages/shared`) is the contract both sides compile against: REST shapes, room and playback types, typed Socket.IO events, error codes, and the size and length limits.
 - Voice audio never passes through the server.
 
 ## Tech stack
 
 | Layer | Technology |
 | --- | --- |
-| Client | React 19, TypeScript 5.9, Vite 7, React Router 7, Tailwind CSS 3, react-hot-toast, react-icons |
-| Realtime client | socket.io-client 4, native WebRTC, Web Audio API |
+| Workspace | pnpm 12 workspaces, TypeScript 5.9 project builds, Node.js 22 |
+| Client | React 19, Vite 7, React Router 7, Tailwind CSS 3, react-hot-toast, react-icons |
+| Realtime client | socket.io-client 4 (typed by the shared contract), native WebRTC, Web Audio API |
 | Media | YouTube IFrame API, HTML5 audio and video, hls.js (loaded on demand) |
-| Server | Node.js 20.19+ (22 LTS recommended), Express 5, Socket.IO 4, Mongoose 9 |
-| Security | JSON Web Tokens, bcryptjs, helmet, express-rate-limit, CORS allowlist |
-| Data | MongoDB 7 (verified), optional Redis for Socket.IO scaling |
-| Quality | ESLint 9, TypeScript project references, Vitest 5, Node test runner |
-| Delivery | Dockerfiles, nginx, Docker Compose, GitHub Actions |
+| API | Express 5, Socket.IO 4, Mongoose 9, TypeScript with native ES modules, tsx for development |
+| Security | JSON Web Tokens (HS256), bcryptjs, helmet, express-rate-limit, CORS allowlist |
+| Data | MongoDB 7, optional Redis for Socket.IO scaling |
+| Quality | Root ESLint 9 configuration, TypeScript strict mode, Vitest 5 (client), Node test runner (API) |
+| Delivery | Multi-stage Dockerfiles, nginx, Docker Compose, GitHub Actions |
 
 ## Getting started
 
 ### Prerequisites
 
-- **Node.js 22.12 or newer** for the client, whose test runner (Vitest 5) requires it. The API runs on Node.js 20.19 or newer.
-- **npm 10** (bundled with Node.js 22).
+- **Node.js 22.12 or newer.** The repository pins Node.js 22 in `.nvmrc`.
+- **pnpm 12**, through Corepack, which ships with Node.js 22. The exact version is pinned by the `packageManager` field in `package.json`.
 - **MongoDB 7**, either a local instance or a hosted connection string.
 - A modern Chromium-based browser (Google Chrome or Microsoft Edge). See [Known limitations](#known-limitations).
 
@@ -118,40 +120,38 @@ git clone https://github.com/mayankhansraj12/youtube-streamer.git
 cd youtube-streamer
 ```
 
-### 2. Start the API
+### 2. Install dependencies
 
 ```bash
-cd server
-cp .env.example .env
+corepack enable      # once per machine; makes the pinned pnpm available
+pnpm install
 ```
 
-Open `server/.env` and set `MONGODB_URI` and `JWT_SECRET` (at least 16 characters). On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
+`pnpm install` reads `pnpm-lock.yaml` and installs every workspace package. Use `pnpm install --frozen-lockfile` in automation so the lockfile is never changed.
+
+### 3. Configure the API
 
 ```bash
-npm ci
-npm start
+cp apps/api/.env.example apps/api/.env
 ```
 
-The API listens on `http://localhost:5000`. Confirm it with `curl http://localhost:5000/api/health`, which should report `"database":"connected"`.
+Open `apps/api/.env` and set `MONGODB_URI` and `JWT_SECRET` (at least 16 characters). On Windows PowerShell, use `Copy-Item apps/api/.env.example apps/api/.env` instead of `cp`.
 
-### 3. Start the client
-
-In a second terminal:
+### 4. Start the API and the client
 
 ```bash
-cd client
-cp .env.example .env.local
-npm ci
-npm run dev
+pnpm dev
 ```
+
+This builds `@streamsync/shared`, then starts the API on `http://localhost:5000` and the client on `http://localhost:5173` with hot reload. Confirm the API with `curl http://localhost:5000/api/health`, which should report `"database":"connected"`.
 
 Open `http://localhost:5173`, create an account, and create a room. Open a second browser profile or window to join it as another participant.
 
-> The client reads `VITE_BACKEND_URL` at build time. Change it in `.env.local` and restart `npm run dev`.
+> The client works without any configuration when the API runs on `http://localhost:5000`. To point it elsewhere, see [Client configuration](#client-apps-webenvlocal). If Vite starts on a different port because 5173 is busy, add that origin to `CLIENT_ORIGIN` in `apps/api/.env`, or the browser will block API calls.
 
 ## Configuration
 
-### API (`server/.env`)
+### API (`apps/api/.env`)
 
 Every variable is validated at startup. A missing or malformed value stops the process with a clear message.
 
@@ -168,9 +168,9 @@ Every variable is validated at startup. A missing or malformed value stops the p
 | `REDIS_URL` | No | unset | Enables the Socket.IO Redis adapter so several API instances share realtime state. See [Known limitations](#known-limitations). |
 | `NODE_ENV` | No | `development` | Set to `production` in deployments. |
 
-### Client (`client/.env.local`)
+### Client (`apps/web/.env.local`)
 
-Client variables are public. Vite inlines them into the JavaScript bundle, so never put secrets here.
+Client variables are public. Vite inlines them into the JavaScript bundle, so never put secrets here. Copy `apps/web/.env.example` to `apps/web/.env.local` only when you need to change a default.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -239,7 +239,7 @@ Authenticated routes accept `Authorization: Bearer <token>`.
 | `GET` | `/api/rooms/:roomId` | Yes | Returns the room, or `404`. |
 | `DELETE` | `/api/rooms/:roomId` | Owner | Ends the room. Participants receive `room:ended`. Returns `204`. |
 
-Errors use one shape: `{ "code": "…", "message": "…" }`.
+Errors use one shape: `{ "code": "…", "message": "…" }`. Every code is defined once in `packages/shared/src/errors.ts`.
 
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
@@ -260,7 +260,7 @@ Errors use one shape: `{ "code": "…", "message": "…" }`.
 
 Connect with the session token in the handshake: `io(API_URL, { auth: { token } })`. A rejected token produces a `connect_error` with the message `UNAUTHORIZED`.
 
-Client events. Events with an acknowledgement return `{ ok: true, … }` or `{ ok: false, code, message }`.
+The event names, payloads, and acknowledgements below are typed in `packages/shared/src/events.ts` (`ClientToServerEvents` and `ServerToClientEvents`). Client events that take an acknowledgement return `{ ok: true, … }` or `{ ok: false, code, message }`.
 
 | Event | Payload | Acknowledgement | Notes |
 | --- | --- | --- | --- |
@@ -290,72 +290,102 @@ Socket error codes match the REST table (`NOT_IN_ROOM`, `ROOM_FULL`, `RATE_LIMIT
 
 ```
 .
-├── .github/workflows/      CI (tests, lint, type check, build) and CD (image publishing on version tags)
-├── assets/                 Images used by this README
-├── client/                 React single-page application (Vite)
-│   ├── public/             Static files served as they are
-│   ├── src/
-│   │   ├── components/     Shared UI and room components
-│   │   ├── context/        Session and realtime connection providers
-│   │   ├── hooks/          Room session, voice, playback, and settings hooks
-│   │   ├── lib/            API and socket clients, voice mesh, utilities, unit tests
-│   │   ├── pages/          Login, signup, home, room, and not-found pages
-│   │   └── player/         Playback adapters for YouTube and HTML5 media
-│   ├── Dockerfile          Multi-stage build served by nginx
-│   ├── nginx.conf          Static hosting with SPA fallback and caching headers
-│   └── vite.config.ts      Build, dev server, and preview configuration
-├── server/                 Express and Socket.IO API
-│   ├── src/
-│   │   ├── index.js        Entry point: database, HTTP, sockets, graceful shutdown
-│   │   ├── app.js          Express application factory
-│   │   ├── config.js       Validated environment configuration
-│   │   ├── db.js           MongoDB connection
-│   │   ├── lib/            Validation, media parsing, identifiers, rate limiting, tokens
-│   │   ├── middleware/     Authentication and error handling
-│   │   ├── models/         User and Room schemas
-│   │   ├── routes/         REST routes for auth and rooms
-│   │   ├── services/       Room persistence and response shaping
-│   │   └── socket/         Socket.IO handshake and room protocol
-│   ├── test/               Unit and integration tests (node:test)
-│   └── Dockerfile          Production image with production dependencies only
-├── docker-compose.yml      MongoDB, API, and client for a single-host deployment
-├── .env.example            Variables read by docker-compose.yml
-└── README.md
+├── apps/
+│   ├── api/                          Express REST API and Socket.IO server (TypeScript, ES modules)
+│   │   ├── src/
+│   │   │   ├── main.ts               Entry point: database, HTTP, sockets, graceful shutdown
+│   │   │   ├── app.ts                Express application factory
+│   │   │   ├── config.ts             Validated environment configuration
+│   │   │   ├── database.ts           MongoDB connection
+│   │   │   ├── http/                 Error handler, HTTP error type, authentication middleware
+│   │   │   ├── lib/                  Validation, identifiers, rate limiter, session tokens, origin checks
+│   │   │   ├── modules/
+│   │   │   │   ├── auth/             User model and auth routes
+│   │   │   │   ├── media/            Media link parser
+│   │   │   │   └── rooms/            Room model, room service, and room routes
+│   │   │   └── realtime/             Socket.IO server and room protocol
+│   │   ├── test/                     Unit and integration tests (node:test, run with tsx)
+│   │   ├── .env.example              Environment template for the API
+│   │   └── Dockerfile                Production image with the compiled API and production dependencies
+│   └── web/                          React single-page application (Vite)
+│       ├── src/
+│       │   ├── components/           Shared UI and room components
+│       │   ├── context/              Session and realtime connection providers
+│       │   ├── hooks/                Room session, voice, playback, and settings hooks
+│       │   ├── lib/                  API and socket clients, voice mesh, utilities, unit tests beside them
+│       │   ├── pages/                Login, signup, home, room, and not-found pages
+│       │   ├── player/               Playback adapters for YouTube and HTML5 media
+│       │   ├── config.ts             Client configuration and playback tuning
+│       │   └── types.ts              Client types, built on the shared contract
+│       ├── .env.example              Environment template for the client
+│       ├── Dockerfile                Build stage, then nginx serving the static bundle
+│       ├── nginx.conf                Static hosting with SPA fallback and caching headers
+│       └── vite.config.ts            Build, dev server, and preview configuration
+├── packages/
+│   └── shared/                       @streamsync/shared: REST and realtime contract, error codes, limits
+├── .github/workflows/                CI (build, typecheck, lint, test, image builds) and CD (image publishing)
+├── assets/                           Images used by this README
+├── docker-compose.yml                MongoDB, API, and web for a single-host deployment
+├── eslint.config.mjs                 Lint rules for every package
+├── tsconfig.base.json                Compiler settings shared by every package
+├── pnpm-workspace.yaml               Workspace packages and the build-script allowlist
+├── package.json                      Root scripts that build, check, and run the workspace
+└── .env.example                      Variables read by docker-compose.yml
 ```
 
 ## Development
 
-### API
+### Root commands
+
+Run these from the repository root.
 
 | Command | Description |
 | --- | --- |
-| `npm start` | Runs the API (`node src/index.js`). |
-| `npm run dev` | Runs the API and restarts on file changes (`node --watch`). |
-| `npm test` | Runs every unit and integration test. |
-| `npm run test:unit` | Runs the unit tests only. |
+| `pnpm install` | Installs every workspace package from the lockfile. |
+| `pnpm dev` | Builds `@streamsync/shared`, then starts the API (port 5000) and the client (port 5173). |
+| `pnpm build` | Builds `@streamsync/shared`, `@streamsync/api`, and `@streamsync/web` in dependency order. |
+| `pnpm typecheck` | Type checks every package. Run `pnpm build` first on a fresh clone, because the API and client resolve the shared package from its build output. |
+| `pnpm lint` | Runs ESLint over the repository with the rules in `eslint.config.mjs`. |
+| `pnpm test` | Runs the API tests and the client tests. |
+| `pnpm check` | Runs build, typecheck, lint, and test in that order. Run it before every pull request. |
 
-### Client
+### Per-package commands
+
+API (`@streamsync/api`):
 
 | Command | Description |
 | --- | --- |
-| `npm run dev` | Starts the Vite development server on port 5173. |
-| `npm run build` | Type checks and produces an optimized bundle in `dist/`. |
-| `npm run preview` | Serves the production bundle locally on port 4173. |
-| `npm run lint` | Runs ESLint with React Hooks and React Refresh rules. |
-| `npm run typecheck` | Runs the TypeScript project build without emitting files. |
-| `npm test` | Runs the Vitest unit tests. |
+| `pnpm --filter @streamsync/api run dev` | Runs the API from source and restarts on file changes (`tsx watch`). |
+| `pnpm --filter @streamsync/api run build` | Compiles the API to `apps/api/dist`. |
+| `pnpm --filter @streamsync/api run start` | Runs the compiled API. Build first. |
+| `pnpm --filter @streamsync/api run test` | Runs every unit and integration test. |
+| `pnpm --filter @streamsync/api run test:unit` | Runs the unit tests only. |
+
+Client (`@streamsync/web`):
+
+| Command | Description |
+| --- | --- |
+| `pnpm --filter @streamsync/web run dev` | Starts the Vite development server on port 5173. |
+| `pnpm --filter @streamsync/web run build` | Type checks and produces an optimized bundle in `apps/web/dist`. |
+| `pnpm --filter @streamsync/web run preview` | Serves the production bundle locally on port 4173. |
+| `pnpm --filter @streamsync/web run test` | Runs the Vitest unit tests. |
+
+Shared contract (`@streamsync/shared`):
+
+| Command | Description |
+| --- | --- |
+| `pnpm --filter @streamsync/shared run build` | Compiles the contract to `packages/shared/dist`, with declaration files. |
 
 ## Testing
 
 - **API unit tests** cover media-link parsing, validation rules, room identifiers, the rate limiter, session tokens, origin checks, and configuration validation.
 - **API integration tests** start the real Express and Socket.IO stack against an in-memory MongoDB. They cover signup and login, room lifecycle, presence, chat, playback synchronization, WebRTC signal isolation, rate limits, room capacity, owner moderation, and relay ordering.
-- **Client unit tests** cover playback clock arithmetic, clock offset estimation, time formatting, chat link splitting, persisted settings sanitization, and the recent-rooms list.
+- **Client unit tests** live beside the code they cover in `apps/web/src/lib`. They cover playback clock arithmetic, clock offset estimation, time formatting, chat link splitting, persisted settings sanitization, and the recent-rooms list.
 
-Run everything:
+Run everything from the repository root:
 
 ```bash
-cd server && npm test
-cd ../client && npm run lint && npm run typecheck && npm test
+pnpm test
 ```
 
 The integration tests download a MongoDB binary through `mongodb-memory-server` on first run. To use an existing database instead, set `MONGODB_URI_TEST` to a dedicated test database. The tests create and reuse their own accounts, but they do not clean the database afterwards.
@@ -364,29 +394,33 @@ Browser-level end-to-end tests are not part of this repository yet.
 
 ## Deployment
 
-### Frontend
+### Client
 
 1. Set `VITE_BACKEND_URL` to the public URL of the API.
-2. Build with `npm run build` in `client/`.
-3. Serve `client/dist/` from any static host. The app uses client-side routes, so configure a fallback to `index.html`. `client/vercel.json` provides this for Vercel, and `client/nginx.conf` provides it for nginx.
+2. Build with `pnpm --filter @streamsync/web... run build` from the repository root. The `...` builds the shared package first.
+3. Serve `apps/web/dist/` from any static host. The app uses client-side routes, so configure a fallback to `index.html`. `apps/web/vercel.json` provides this for Vercel, and `apps/web/nginx.conf` provides it for nginx.
 
-### Backend
+### API
 
-1. Install production dependencies with `npm ci --omit=dev` in `server/` and run `npm start` on Node 20.19 or newer.
-2. Set `MONGODB_URI`, `JWT_SECRET`, and `CLIENT_ORIGIN` to your frontend's origin.
-3. Behind a reverse proxy, set `TRUST_PROXY` and make sure the proxy forwards WebSocket upgrades for `/socket.io/`.
-4. Serve both the API and the client over HTTPS. Browsers only allow microphone access in a secure context; `localhost` is the only exception during development.
+1. Install the locked dependencies: `pnpm install --frozen-lockfile`.
+2. Build the API and the shared package it depends on: `pnpm --filter @streamsync/api... run build`.
+3. Write a production-only copy of the API to a directory of your choice: `pnpm --filter @streamsync/api deploy --prod /srv/streamsync-api`. The copy contains the compiled `dist/` and only the production dependencies.
+4. Run it with Node.js 22.12 or newer, with `MONGODB_URI`, `JWT_SECRET`, and `CLIENT_ORIGIN` set to your values: `cd /srv/streamsync-api && NODE_ENV=production node dist/main.js`.
+5. Behind a reverse proxy, set `TRUST_PROXY` and make sure the proxy forwards WebSocket upgrades for `/socket.io/`.
+6. Serve both the API and the client over HTTPS. Browsers only allow microphone access in a secure context; `localhost` is the only exception during development.
 
 ### Containers
 
-`docker-compose.yml` runs MongoDB 7, the API, and the client behind nginx:
+`docker-compose.yml` runs MongoDB 7, the API, and the web client behind nginx. The images are built from the repository root, so the whole workspace is available to the build.
 
 ```bash
 cp .env.example .env        # then set JWT_SECRET
 docker compose up --build -d
 ```
 
-The client is served on `http://localhost:8080` and the API on `http://localhost:5000`. The compose file sets `CLIENT_ORIGIN` to the client address and passes `VITE_BACKEND_URL` into the client build. Stop the stack with `docker compose down`; add `-v` to also delete the MongoDB data volume.
+The web client is served on `http://localhost:8080` and the API on `http://localhost:5000`. The compose file sets `CLIENT_ORIGIN` to the client address and passes `VITE_BACKEND_URL` into the client build. Stop the stack with `docker compose down`; add `-v` to also delete the MongoDB data volume.
+
+The two images are defined by `apps/api/Dockerfile` and `apps/web/Dockerfile`. Build either one on its own with `docker build -f apps/api/Dockerfile .`.
 
 ## Troubleshooting
 
@@ -394,7 +428,9 @@ The client is served on `http://localhost:8080` and the API on `http://localhost
 - **Autoplay was blocked.** Select the play overlay on the player once to start playback.
 - **The YouTube player does not load.** An ad blocker or a restrictive network may block `youtube.com`. Also check that the uploader allows embedding.
 - **Voice does not connect.** Both participants need an open path to each other. Behind strict firewalls or symmetric NAT, configure a TURN server with `VITE_ICE_SERVERS`.
-- **The API will not start.** The message names the missing or invalid variable. `JWT_SECRET` must be at least 16 characters.
+- **The API will not start.** The message names the missing or invalid variable. `JWT_SECRET` must be at least 16 characters, and the API reads `apps/api/.env`.
+- **The browser reports a CORS error.** The page's origin must appear in `CLIENT_ORIGIN`. Vite may choose another port if 5173 is busy, so add that origin.
+- **`pnpm` refuses to run.** Enable Corepack with `corepack enable`, then run the command again from the repository root. The pnpm version comes from the `packageManager` field.
 
 ## Security
 
