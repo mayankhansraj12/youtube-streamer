@@ -4,6 +4,8 @@ import { verifySession, type SessionUser } from '../lib/session-token.js';
 import { HttpError } from './http-error.js';
 
 declare global {
+  // Express declares Request inside this global namespace, so the augmentation has to use it too.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: SessionUser;
