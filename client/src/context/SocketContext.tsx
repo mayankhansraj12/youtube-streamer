@@ -1,35 +1,31 @@
-import * as React from 'react';
-import { createContext, useContext, useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useEffect, useMemo, type ReactNode } from 'react';
+import { getSocket } from '../lib/socket';
+import { useAuth } from './authState';
+import { SocketContext } from './socketState';
 
-const SocketContext = createContext<Socket | null>(null);
+/**
+ * Provides the realtime connection for the signed-in session. The socket authenticates with
+ * the session token, and a rejected handshake signs the user out.
+ */
+export function SocketProvider({ children }: { children: ReactNode }) {
+  const { token, logout } = useAuth();
+  const socket = useMemo(() => (token ? getSocket(token) : null), [token]);
 
-export const useSocket = () => {
-    return useContext(SocketContext);
-};
+  useEffect(() => {
+    if (!socket) return undefined;
 
-interface SocketProviderProps {
-    children: React.ReactNode;
+    const onConnectError = (error: Error) => {
+      if (error.message === 'UNAUTHORIZED') logout();
+    };
+
+    socket.on('connect_error', onConnectError);
+    socket.connect();
+
+    return () => {
+      socket.off('connect_error', onConnectError);
+      socket.disconnect();
+    };
+  }, [socket, logout]);
+
+  return <SocketContext.Provider value={socket}>{children}</SocketContext.Provider>;
 }
-
-export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
-    const [socket, setSocket] = useState<Socket | null>(null);
-
-    useEffect(() => {
-        const SERVER_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-        const newSocket = io(SERVER_URL, {
-            transports: ['websocket', 'polling']
-        });
-        setSocket(newSocket);
-
-        return () => {
-            newSocket.disconnect();
-        };
-    }, []);
-
-    return (
-        <SocketContext.Provider value={socket}>
-            {children}
-        </SocketContext.Provider>
-    );
-};

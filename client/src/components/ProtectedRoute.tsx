@@ -1,14 +1,18 @@
-import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/authState';
+import LoadingScreen from './LoadingScreen';
 
-const ProtectedRoute = () => {
-    const { isAuthenticated, loading } = useAuth();
+/** Sends signed-out visitors to /login and returns them to the requested page afterwards. */
+export default function ProtectedRoute() {
+  const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
 
-    if (loading) {
-        return <div className="flex h-screen items-center justify-center bg-black text-white">Loading...</div>;
-    }
+  if (loading) return <LoadingScreen label="Checking your session" />;
 
-    return isAuthenticated ? <Outlet /> : <Navigate to="/login" />;
-};
+  if (!isAuthenticated) {
+    const from = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to="/login" replace state={{ from }} />;
+  }
 
-export default ProtectedRoute;
+  return <Outlet />;
+}
