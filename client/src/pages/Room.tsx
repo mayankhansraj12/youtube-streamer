@@ -1,13 +1,18 @@
 import { useEffect, useState, useRef } from 'react';
 import toast from 'react-hot-toast';
-import type { FormEvent, ChangeEvent, MouseEvent, MutableRefObject, FC } from 'react';
+import type { FC, FormEvent, ChangeEvent, MouseEvent } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import SimplePeer from 'simple-peer';
 import { useSocket } from '../context/SocketContext';
-import {
-    FaPlay, FaPause, FaMicrophone, FaMicrophoneSlash,
-    FaVideo, FaExpand, FaCompress, FaPaperPlane
-} from 'react-icons/fa';
+import { FaMicrophone, FaMicrophoneSlash } from 'react-icons/fa';
+
+// Components
+import RoomHeader from '../components/Room/RoomHeader';
+import RoomModals from '../components/Room/RoomModals';
+import VideoStage from '../components/Room/VideoStage';
+import ChatPanel from '../components/Room/ChatPanel';
+import ParticipantList from '../components/Room/ParticipantList';
+import AudioPeer from '../components/Room/AudioPeer';
 
 // Polyfill for SimplePeer
 if (typeof window !== 'undefined' && !(window as any).process) {
@@ -29,145 +34,6 @@ interface ChatMessage {
     time: string;
     isSystem?: boolean;
 }
-
-declare global {
-    interface Window {
-        YT: any;
-        onYouTubeIframeAPIReady: () => void;
-    }
-}
-
-// --- NATIVE YOUTUBE PLAYER COMPONENT ---
-const NativeYouTubePlayer = ({
-    videoId,
-    playing,
-    seekTo,
-    onProgress,
-    onDuration,
-    onStateChange,
-    playerInstanceRef
-}: {
-    videoId: string,
-    playing: boolean,
-    seekTo: number | null,
-    onProgress: (time: number) => void,
-    onDuration: (duration: number) => void,
-    onStateChange: (state: number) => void,
-    playerInstanceRef: MutableRefObject<any>
-}) => {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const [apiReady, setApiReady] = useState(false);
-    const onStateChangeRef = useRef(onStateChange);
-
-    useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
-
-    useEffect(() => {
-        if (!window.YT) {
-            const tag = document.createElement('script');
-            tag.src = "https://www.youtube.com/iframe_api";
-            const firstScriptTag = document.getElementsByTagName('script')[0];
-            firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
-            window.onYouTubeIframeAPIReady = () => setApiReady(true);
-        } else {
-            setApiReady(true);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (apiReady && containerRef.current && !playerInstanceRef.current && videoId) {
-            playerInstanceRef.current = new window.YT.Player(containerRef.current, {
-                height: '100%',
-                width: '100%',
-                videoId: videoId,
-                playerVars: {
-                    'playsinline': 1, 'controls': 0, 'disablekb': 1, 'rel': 0,
-                    'modestbranding': 1, 'origin': window.location.origin,
-                    'iv_load_policy': 3, // Hide annotations
-                    'loop': 1, // Hack to minimize related videos
-                    'playlist': videoId
-                },
-                events: {
-                    'onReady': (event: any) => { if (playing) event.target.playVideo(); },
-                    'onStateChange': (event: any) => {
-                        if (onStateChangeRef.current) onStateChangeRef.current(event.data);
-                        if (event.data === 1 && event.target.getDuration) onDuration(event.target.getDuration());
-                    }
-                }
-            });
-        }
-    }, [apiReady, videoId]);
-
-    // External Control Sync
-    useEffect(() => { if (playerInstanceRef.current?.loadVideoById && videoId) playerInstanceRef.current.loadVideoById(videoId); }, [videoId]);
-    useEffect(() => { if (playerInstanceRef.current?.playVideo) playing ? playerInstanceRef.current.playVideo() : playerInstanceRef.current.pauseVideo(); }, [playing]);
-    useEffect(() => { if (seekTo !== null && playerInstanceRef.current?.seekTo) playerInstanceRef.current.seekTo(seekTo, true); }, [seekTo]);
-
-    // Poller
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (playerInstanceRef.current?.getCurrentTime) {
-                const t = playerInstanceRef.current.getCurrentTime();
-                onProgress(t);
-                const d = playerInstanceRef.current.getDuration();
-                if (d) onDuration(d);
-            }
-        }, 500);
-        return () => clearInterval(interval);
-    }, []);
-
-    return <div ref={containerRef} className="w-full h-full" />;
-};
-
-
-// --- CUSTOM CONTROLS ---
-const ControlBar = ({
-    playing, currentTime, duration, onTogglePlay, onSeek, onSeekEnd, onFullscreen, isFullscreen
-}: {
-    playing: boolean, currentTime: number, duration: number,
-    onTogglePlay: () => void, onSeek: (e: ChangeEvent<HTMLInputElement>) => void, onSeekEnd: (e: MouseEvent<HTMLInputElement>) => void,
-    onFullscreen: () => void, isFullscreen: boolean
-}) => {
-    const formatTime = (s: number) => {
-        if (!s || isNaN(s)) return "00:00";
-        const date = new Date(s * 1000);
-        const mm = date.getUTCMinutes();
-        const ss = date.getUTCSeconds().toString().padStart(2, '0');
-        const hh = date.getUTCHours();
-        return hh ? `${hh}:${mm.toString().padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
-    }
-    const progress = duration > 0 ? (currentTime / duration) : 0;
-
-    return (
-        <div className="absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black/95 via-black/80 to-transparent px-6 pb-6 pt-16 opacity-0 group-hover:opacity-100 transition-opacity duration-300 transform translate-y-2 group-hover:translate-y-0">
-            {/* Timeline */}
-            <div className="relative w-full h-1.5 group/slider cursor-pointer mb-4 items-center flex">
-                <div className="absolute inset-0 bg-white/20 rounded-full"></div>
-                <div className="absolute left-0 h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full relative" style={{ width: `${Math.min(progress * 100, 100)}%` }}>
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-[0_0_10px_rgba(236,72,153,0.7)] scale-0 group-hover/slider:scale-100 transition-transform"></div>
-                </div>
-                <input type="range" min="0" max="1" step="0.001" value={progress || 0} onChange={onSeek} onMouseUp={onSeekEnd} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-            </div>
-
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-6">
-                    <button onClick={(e) => { e.stopPropagation(); onTogglePlay(); }} className="text-white hover:text-pink-400 focus:outline-none transform active:scale-95 transition-all p-2 rounded-full hover:bg-white/10">
-                        {playing ? <FaPause size={24} /> : <FaPlay size={24} />}
-                    </button>
-                    <span className="text-sm font-mono text-gray-300 select-none pointer-events-none">
-                        {formatTime(currentTime)} <span className="text-gray-500">/</span> {formatTime(duration)}
-                    </span>
-                </div>
-
-                <div className="flex items-center gap-4">
-                    <button onClick={(e) => { e.stopPropagation(); onFullscreen(); }} className="text-white hover:text-pink-400 p-2 rounded-full hover:bg-white/10" title="Fullscreen">
-                        {isFullscreen ? <FaCompress size={20} /> : <FaExpand size={20} />}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
 
 const Room: FC = () => {
     const { roomId } = useParams();
@@ -199,6 +65,7 @@ const Room: FC = () => {
     const [muted, setMuted] = useState(false);
 
     // Room Management
+    const [roomName, setRoomName] = useState<string>(location.state?.roomName || '');
     const [roomOwner, setRoomOwner] = useState<string>('');
     const [showLeaveModal, setShowLeaveModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -221,7 +88,7 @@ const Room: FC = () => {
 
                 // 2. Join or Create Room
                 if (create) {
-                    socket.emit('create-room', roomId, username);
+                    socket.emit('create-room', roomId, username, roomName);
                     // Clear create flag from history so back button/refresh treats this as a join
                     navigate('.', { replace: true, state: { ...location.state, create: false } });
                 } else {
@@ -237,6 +104,7 @@ const Room: FC = () => {
                 });
                 socket.on('room-sync', (data) => {
                     if (data.owner) setRoomOwner(data.owner);
+                    if (data.name) setRoomName(data.name);
                     setMessages(data.messages || []);
                     if (data.videoState) {
                         if (data.videoState.url) { setCurrentUrl(data.videoState.url); setInputUrl(data.videoState.url); }
@@ -493,92 +361,41 @@ const Room: FC = () => {
 
     return (
         <div className="flex flex-col lg:flex-row h-screen bg-[#0f0f0f] text-white font-sans overflow-hidden">
-            {/* LIFT: Main Content */}
+            {/* LEFT: Main Content */}
             <div className="w-full lg:flex-1 h-[40vh] lg:h-auto flex flex-col relative transition-all duration-300 flex-shrink-0">
-                {/* Header */}
-                <header className="h-16 lg:h-20 flex items-center justify-between px-4 lg:px-8 absolute top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
-                    <div className="pointer-events-auto flex items-center gap-2 lg:gap-4 bg-white/5 backdrop-blur-md px-3 lg:px-4 py-1.5 lg:py-2 rounded-full border border-white/10 shadow-lg scale-90 lg:scale-100 origin-left">
-                        <div className="bg-gradient-to-tr from-purple-600 to-pink-600 p-1.5 lg:p-2 rounded-full shadow-[0_0_15px_rgba(168,85,247,0.4)]">
-                            <FaVideo className="text-white text-xs lg:text-sm" />
-                        </div>
-                        <span className="font-bold tracking-wide text-xs lg:text-base">Room <span className="text-purple-400 font-mono">{roomId}</span></span>
-                    </div>
 
-                    {/* URL Bar - Hidden on mobile, visible on desktop */}
-                    <div className="pointer-events-auto hidden md:flex items-center gap-2 bg-black/40 backdrop-blur-md p-1.5 rounded-2xl border border-white/10 w-96 max-w-lg shadow-xl hover:border-purple-500/30 transition-colors">
-                        <input
-                            className="flex-1 bg-transparent border-none text-sm px-4 focus:outline-none placeholder-gray-500"
-                            placeholder="Paste YouTube Link..."
-                            value={inputUrl}
-                            onChange={(e) => setInputUrl(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && submitUrl()}
-                        />
-                        <button onClick={submitUrl} className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider hover:opacity-90">
-                            Play
-                        </button>
-                    </div>
+                <RoomHeader
+                    roomName={roomName}
+                    inputUrl={inputUrl}
+                    setInputUrl={setInputUrl}
+                    submitUrl={submitUrl}
+                    roomOwner={roomOwner}
+                    username={username}
+                    setShowDeleteModal={setShowDeleteModal}
+                    setShowLeaveModal={setShowLeaveModal}
+                />
 
-                    <div className="pointer-events-auto flex items-center gap-2">
-                        {roomOwner === username ? (
-                            <button className="bg-red-500/10 hover:bg-red-600 text-red-500 hover:text-white px-3 lg:px-4 py-1.5 lg:py-2 rounded-lg transition-all border border-red-500/20 text-xs lg:text-sm font-semibold" onClick={() => setShowDeleteModal(true)}>
-                                Delete
-                            </button>
-                        ) : (
-                            <button className="bg-white/5 hover:bg-red-500/20 text-gray-300 hover:text-red-400 px-3 lg:px-4 py-1.5 lg:py-2 rounded-lg transition-all border border-white/10 text-xs lg:text-sm font-semibold" onClick={() => setShowLeaveModal(true)}>
-                                Leave
-                            </button>
-                        )}
-                    </div>
-                </header>
-
-                {/* Video Stage */}
-                <div className="flex-1 flex items-center justify-center p-2 lg:p-10 relative bg-black/50" ref={videoContainerRef}>
-                    <div className="w-full h-full max-w-6xl aspect-video bg-black relative rounded-xl lg:rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/5 ring-1 ring-white/5 group">
-                        {videoId ? (
-                            <>
-                                <NativeYouTubePlayer
-                                    videoId={videoId} playing={playing} seekTo={seekTrigger}
-                                    onProgress={(t) => !isDragging && setCurrentTime(t)}
-                                    onDuration={setDuration} onStateChange={handlePlayerStateChange}
-                                    playerInstanceRef={playerInstanceRef}
-                                />
-                                <div
-                                    className={`absolute inset-0 z-10 flex items-center justify-center transition-all duration-300 ${!playing ? 'bg-black/60 backdrop-blur-sm group-hover:bg-black/40' : 'bg-transparent'}`}
-                                    onClick={handleTogglePlay}
-                                >
-                                    {!playing && (
-                                        <div className="bg-white/10 p-6 rounded-full backdrop-blur-md border border-white/20 shadow-xl group-hover:scale-110 transition-transform">
-                                            <FaPlay size={40} className="text-white ml-2" />
-                                        </div>
-                                    )}
-                                </div>
-                                <ControlBar
-                                    playing={playing} currentTime={currentTime} duration={duration}
-                                    onTogglePlay={handleTogglePlay} onSeek={handleSeek} onSeekEnd={handleSeekEnd}
-                                    onFullscreen={handleFullscreen}
-                                    isFullscreen={isFullscreen}
-                                />
-                            </>
-                        ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">
-                                <div className="p-4 lg:p-6 rounded-full bg-white/5 mb-4 animate-pulse"><FaVideo size={30} className="opacity-20 lg:w-10 lg:h-10" /></div>
-                                <p className="text-gray-400 font-light text-sm lg:text-base">Waiting for video...</p>
-                                {/* Mobile Input for Video if URL Bar is hidden */}
-                                <div className="md:hidden mt-4 w-3/4 flex gap-2">
-                                    <input
-                                        className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none"
-                                        placeholder="Paste Link..."
-                                        value={inputUrl}
-                                        onChange={(e) => setInputUrl(e.target.value)}
-                                    />
-                                    <button onClick={submitUrl} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-xs font-bold">
-                                        GO
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
+                <VideoStage
+                    videoId={videoId}
+                    playing={playing}
+                    seekTrigger={seekTrigger}
+                    isDragging={isDragging}
+                    setCurrentTime={setCurrentTime}
+                    setDuration={setDuration}
+                    handlePlayerStateChange={handlePlayerStateChange}
+                    playerInstanceRef={playerInstanceRef}
+                    handleTogglePlay={handleTogglePlay}
+                    currentTime={currentTime}
+                    duration={duration}
+                    handleSeek={handleSeek}
+                    handleSeekEnd={handleSeekEnd}
+                    handleFullscreen={handleFullscreen}
+                    isFullscreen={isFullscreen}
+                    inputUrl={inputUrl}
+                    setInputUrl={setInputUrl}
+                    submitUrl={submitUrl}
+                    videoContainerRef={videoContainerRef}
+                />
 
                 {/* Bottom Bar: Mic Controls - Compact on mobile */}
                 <div className="h-14 lg:h-20 bg-[#0a0a0a]/50 backdrop-blur-sm flex items-center justify-center border-t border-white/5">
@@ -612,104 +429,45 @@ const Room: FC = () => {
                 <div className="flex-1 overflow-hidden relative bg-[#0f0f0f]/50">
                     {/* CHAT */}
                     {sidebarTab === 'chat' && (
-                        <div className="absolute inset-0 flex flex-col">
-                            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-                                {messages.map((m, i) => (
-                                    <div key={i} className={`flex flex-col ${m.user === username ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2`}>
-                                        <div className="flex items-center gap-2 mb-1 opacity-50">
-                                            <span className="text-[10px] uppercase tracking-wider font-bold">{m.user}</span>
-                                            {m.time && <span className="text-[10px] text-gray-600">{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
-                                        </div>
-                                        <div className={`px-4 py-3 rounded-2xl max-w-[85%] text-sm shadow-md ${m.isSystem ? 'bg-transparent text-gray-500 italic text-center w-full shadow-none'
-                                            : m.user === username
-                                                ? 'bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-br-none'
-                                                : 'bg-[#222] border border-white/10 text-gray-200 rounded-bl-none'
-                                            }`}>
-                                            {m.text}
-                                        </div>
-                                    </div>
-                                ))}
-                                <div ref={chatEndRef}></div>
-                            </div>
-                            <form onSubmit={handleSendMessage} className="p-4 bg-[#151515] border-t border-white/5 flex gap-2">
-                                <input
-                                    className="flex-1 bg-[#222] border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500/50 transition-colors placeholder-gray-600"
-                                    placeholder="Type something..."
-                                    value={msgInput}
-                                    onChange={(e) => setMsgInput(e.target.value)}
-                                />
-                                <button type="submit" className="bg-white/10 hover:bg-white/20 p-3 rounded-xl text-white transition-colors disabled:opacity-30" disabled={!msgInput.trim()}>
-                                    <FaPaperPlane size={16} />
-                                </button>
-                            </form>
-                        </div>
+                        <ChatPanel
+                            roomId={roomId || ''}
+                            messages={messages}
+                            username={username}
+                            msgInput={msgInput}
+                            setMsgInput={setMsgInput}
+                            handleSendMessage={handleSendMessage}
+                            chatEndRef={chatEndRef}
+                        />
                     )}
 
                     {/* PARTICIPANTS */}
                     {sidebarTab === 'participants' && (
-                        <div className="absolute inset-0 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                            <div className="flex items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center font-bold text-white shadow-lg">{username?.charAt(0).toUpperCase()}</div>
-                                <div className="flex flex-col">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-bold text-gray-200">{username} (You)</span>
-                                        {roomOwner === username && <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-1.5 py-0.5 rounded border border-yellow-500/30">OWNER</span>}
-                                    </div>
-                                    <span className="text-xs text-green-400 flex items-center gap-1"><div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div> Connected {muted && '(Muted)'}</span>
-                                </div>
-                            </div>
-                            {peers.map((peer) => (
-                                <div key={peer.peerId} className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
-                                    <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center font-bold text-gray-300 shadow-inner">
-                                        {peer.username ? peer.username.charAt(0).toUpperCase() : '?'}
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-medium text-gray-300">{peer.username || 'Connecting...'}</span>
-                                            {roomOwner === peer.username && <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-1.5 py-0.5 rounded border border-yellow-500/30">OWNER</span>}
-                                        </div>
-                                        <span className="text-xs text-gray-500 flex items-center gap-1">
-                                            {peer.isMuted ? <FaMicrophoneSlash className="text-red-400" size={10} /> : <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>}
-                                            {peer.isMuted ? 'Muted' : 'Speaking'}
-                                        </span>
-                                    </div>
-                                    <AudioPeer key={peer.peerId} stream={peer.stream || null} />
-                                </div>
-                            ))}
-                            <div className="mt-8 px-8 text-center opacity-50">
-                                <p className="text-xs text-gray-500">Invite friends by sharing the URL</p>
-                            </div>
-                        </div>
+                        <ParticipantList
+                            peers={peers}
+                            username={username}
+                            roomOwner={roomOwner}
+                            muted={muted}
+                        />
                     )}
                 </div>
             </div>
 
             {/* Modals */}
-            {showLeaveModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                    <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in-95">
-                        <h3 className="text-xl font-bold text-white mb-2">Leave Room?</h3>
-                        <p className="text-gray-400 mb-6 text-sm">Are you sure you want to leave this room? You can rejoin later.</p>
-                        <div className="flex gap-3 justify-end">
-                            <button className="px-4 py-2 text-gray-300 hover:text-white transition-colors text-sm" onClick={() => setShowLeaveModal(false)}>Cancel</button>
-                            <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-sm font-semibold" onClick={handleLeaveRoom}>Leave</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <RoomModals
+                showLeaveModal={showLeaveModal}
+                setShowLeaveModal={setShowLeaveModal}
+                showDeleteModal={showDeleteModal}
+                setShowDeleteModal={setShowDeleteModal}
+                handleLeaveRoom={handleLeaveRoom}
+                handleDeleteRoom={handleDeleteRoom}
+            />
 
-            {showDeleteModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                    <div className="bg-[#1a1a1a] border border-red-500/30 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in-95">
-                        <h3 className="text-xl font-bold text-red-500 mb-2">Delete Room?</h3>
-                        <p className="text-gray-400 mb-6 text-sm">WARNING: This will permanently delete the room and kick ALL participants out. This action cannot be undone.</p>
-                        <div className="flex gap-3 justify-end">
-                            <button className="px-4 py-2 text-gray-300 hover:text-white transition-colors text-sm" onClick={() => setShowDeleteModal(false)}>Cancel</button>
-                            <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-sm font-semibold" onClick={handleDeleteRoom}>Delete Everything</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Audio Peers (Hidden but always active) */}
+            <div className="hidden">
+                {peers.map((peer) => (
+                    <AudioPeer key={peer.peerId} stream={peer.stream || null} />
+                ))}
+            </div>
 
             <style>{`
                 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
@@ -718,26 +476,6 @@ const Room: FC = () => {
             `}</style>
         </div>
     );
-};
-
-const AudioPeer: FC<{ stream: MediaStream | null }> = ({ stream }) => {
-    const ref = useRef<HTMLAudioElement>(null);
-
-    useEffect(() => {
-        if (ref.current && stream) {
-            ref.current.srcObject = stream;
-            ref.current.muted = false;
-            ref.current.volume = 1.0;
-            const playPromise = ref.current.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(e => {
-                    console.log('Audio Autoplay prevented. User interaction may be required.', e);
-                });
-            }
-        }
-    }, [stream]);
-
-    return <audio ref={ref} autoPlay playsInline />;
 };
 
 export default Room;
