@@ -29,10 +29,10 @@ function toParticipant(socketId, data) {
 }
 
 /** Presence is derived from live sockets, so it stays correct across restarts and multiple nodes. */
-async function listParticipants(io, roomId) {
+async function listParticipants(io, roomId, excludeId = null) {
   const sockets = await io.in(roomId).fetchSockets();
   return sockets
-    .filter((remote) => remote.data.roomId === roomId)
+    .filter((remote) => remote.id !== excludeId && remote.data.roomId === roomId)
     .map((remote) => toParticipant(remote.id, remote.data))
     .sort((a, b) => a.joinedAt - b.joinedAt);
 }
@@ -41,10 +41,12 @@ async function leaveRoom(io, socket) {
   const roomId = socket.data.roomId;
   if (!roomId) return;
 
+  const wasMember = socket.rooms.has(roomId);
   const participant = toParticipant(socket.id, socket.data);
   socket.data.roomId = null;
-  socket.leave(roomId);
+  if (!wasMember) return;
 
+  socket.leave(roomId);
   const participants = await listParticipants(io, roomId);
   io.to(roomId).emit('presence:update', { participants, event: { type: 'left', participant } });
 }
@@ -81,8 +83,9 @@ function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
   };
 
   const requireRoom = () => {
-    if (!socket.data.roomId) throw new HttpError(409, 'NOT_IN_ROOM', 'Join a room first');
-    return socket.data.roomId;
+    const roomId = socket.data.roomId;
+    if (!roomId || !socket.rooms.has(roomId)) throw new HttpError(409, 'NOT_IN_ROOM', 'Join a room first');
+    return roomId;
   };
 
   const on = (event, handler) => {
@@ -108,7 +111,7 @@ function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
     if (socket.data.roomId && socket.data.roomId !== roomId) {
       await leaveRoom(io, socket);
     }
-    const alreadyJoined = socket.data.roomId === roomId;
+    const alreadyJoined = socket.data.roomId === roomId && socket.rooms.has(roomId);
 
     const room = await roomService.findRoomForSnapshot(roomId);
     if (!room) throw new HttpError(404, 'ROOM_NOT_FOUND', 'Room not found');
@@ -159,6 +162,33 @@ function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
 
     const participants = await listParticipants(io, roomId);
     io.to(roomId).emit('presence:update', { participants });
+    reply(ack);
+  });
+
+  on('room:kick', async (payload, ack) => {
+    const roomId = requireRoom();
+    const room = await roomService.findRoom(roomId);
+    if (!room) throw new HttpError(404, 'ROOM_NOT_FOUND', 'This room no longer exists');
+    if (String(room.ownerId) !== socket.data.user.id) {
+      throw new HttpError(403, 'FORBIDDEN', 'Only the room owner can remove participants');
+    }
+
+    const targetId = payload && typeof payload.socketId === 'string' ? payload.socketId : '';
+    if (!targetId || targetId === socket.id) {
+      throw new HttpError(400, 'VALIDATION_ERROR', 'Choose another participant to remove');
+    }
+
+    const [target] = await io.in(targetId).fetchSockets();
+    if (!target || !target.rooms.has(roomId)) {
+      throw new HttpError(404, 'NOT_IN_ROOM', 'That participant is no longer in the room');
+    }
+
+    const participant = toParticipant(target.id, target.data);
+    io.to(targetId).emit('room:kicked', { roomId });
+    io.in(targetId).socketsLeave(roomId);
+
+    const participants = await listParticipants(io, roomId, targetId);
+    io.to(roomId).emit('presence:update', { participants, event: { type: 'left', participant } });
     reply(ack);
   });
 
@@ -219,7 +249,7 @@ function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
   // WebRTC signalling is relayed only between sockets that share a room.
   socket.on('rtc:signal', async (payload) => {
     const roomId = socket.data.roomId;
-    if (!roomId || !limits.signal.take()) return;
+    if (!roomId || !socket.rooms.has(roomId) || !limits.signal.take()) return;
 
     const to = payload && payload.to;
     if (typeof to !== 'string' || to === socket.id) return;
@@ -229,7 +259,7 @@ function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
     if (!description && !candidate) return;
 
     const [target] = await io.in(to).fetchSockets();
-    if (!target || target.data.roomId !== roomId) return;
+    if (!target || !target.rooms.has(roomId)) return;
 
     io.to(to).emit('rtc:signal', { from: socket.id, description, candidate });
   });
