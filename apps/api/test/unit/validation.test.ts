@@ -1,8 +1,6 @@
-'use strict';
-
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const {
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
   normalizeUsername,
   normalizeEmail,
   validatePassword,
@@ -10,7 +8,7 @@ const {
   normalizeMessageText,
   requireBoolean,
   requirePosition,
-} = require('../../src/lib/validation');
+} from '../../src/lib/validation.js';
 
 test('usernames are trimmed and limited to 3-24 safe characters', () => {
   assert.equal(normalizeUsername('  Mayank_01 '), 'Mayank_01');

@@ -1,17 +1,15 @@
-'use strict';
-
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const { generateRoomId, normalizeRoomId } = require('../../src/lib/ids');
-const { createRateLimiter } = require('../../src/lib/rateLimiter');
-const { signSession, verifySession } = require('../../src/lib/auth');
-const { isOriginAllowed } = require('../../src/lib/origins');
-const { loadConfig } = require('../../src/config');
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { generateRoomId, normalizeRoomId } from '../../src/lib/ids.js';
+import { createRateLimiter } from '../../src/lib/rate-limiter.js';
+import { signSession, verifySession } from '../../src/lib/session-token.js';
+import { isOriginAllowed } from '../../src/lib/origins.js';
+import { loadConfig } from '../../src/config.js';
 
 const SECRET = 'unit-test-secret-0123456789';
 
 test('generated room ids are 8 unambiguous lowercase characters', () => {
-  const ids = new Set();
+  const ids = new Set<string>();
   for (let i = 0; i < 500; i += 1) {
     const id = generateRoomId();
     assert.match(id, /^[abcdefghjkmnpqrstuvwxyz23456789]{8}$/);

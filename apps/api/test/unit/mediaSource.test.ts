@@ -1,8 +1,6 @@
-'use strict';
-
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const { parseMediaSource, parseStartTime } = require('../../src/lib/mediaSource');
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseMediaSource, parseStartTime } from '../../src/modules/media/media-source.js';
 
 const VIDEO_ID = 'dQw4w9WgXcQ';
 const CANONICAL = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
@@ -49,7 +47,9 @@ test('rejects YouTube links that do not contain a valid video id', () => {
 });
 
 test('classifies direct media links by file extension', () => {
-  const pick = ({ kind, mediaType, format }) => ({ kind, mediaType, format });
+  // Direct links carry mediaType and format; YouTube sources do not, so both are optional here.
+  type Classification = { kind: string; mediaType?: string; format?: string };
+  const pick = ({ kind, mediaType, format }: Classification) => ({ kind, mediaType, format });
 
   assert.deepEqual(pick(parseMediaSource('https://cdn.example.com/clips/intro.mp4')), {
     kind: 'media',
