@@ -4,7 +4,7 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { startTestServer } = require('../helpers/testServer');
 const { PASSWORD, uniqueUsername, api, createAccount } = require('../helpers/client');
-const User = require('../../models/User');
+const User = require('../../src/models/User');
 
 describe('auth API', () => {
   let server;

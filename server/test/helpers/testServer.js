@@ -3,12 +3,12 @@
 const http = require('node:http');
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
-const { loadConfig } = require('../../config');
-const { connectDatabase, disconnectDatabase } = require('../../db');
-const { createApp } = require('../../app');
-const { createSocketServer } = require('../../socket');
-const User = require('../../models/User');
-const Room = require('../../models/Room');
+const { loadConfig } = require('../../src/config');
+const { connectDatabase, disconnectDatabase } = require('../../src/db');
+const { createApp } = require('../../src/app');
+const { createSocketServer } = require('../../src/socket');
+const User = require('../../src/models/User');
+const Room = require('../../src/models/Room');
 
 /**
  * Boots the real API and Socket.IO server on a random port. Uses an in-memory MongoDB

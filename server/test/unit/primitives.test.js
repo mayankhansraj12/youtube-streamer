@@ -2,11 +2,11 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { generateRoomId, normalizeRoomId } = require('../../lib/ids');
-const { createRateLimiter } = require('../../lib/rateLimiter');
-const { signSession, verifySession } = require('../../lib/auth');
-const { isOriginAllowed } = require('../../lib/origins');
-const { loadConfig } = require('../../config');
+const { generateRoomId, normalizeRoomId } = require('../../src/lib/ids');
+const { createRateLimiter } = require('../../src/lib/rateLimiter');
+const { signSession, verifySession } = require('../../src/lib/auth');
+const { isOriginAllowed } = require('../../src/lib/origins');
+const { loadConfig } = require('../../src/config');
 
 const SECRET = 'unit-test-secret-0123456789';
 

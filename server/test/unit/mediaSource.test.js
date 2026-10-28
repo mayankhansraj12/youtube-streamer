@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseMediaSource, parseStartTime } = require('../../lib/mediaSource');
+const { parseMediaSource, parseStartTime } = require('../../src/lib/mediaSource');
 
 const VIDEO_ID = 'dQw4w9WgXcQ';
 const CANONICAL = `https://www.youtube.com/watch?v=${VIDEO_ID}`;

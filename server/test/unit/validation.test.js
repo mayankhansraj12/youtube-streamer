@@ -10,7 +10,7 @@ const {
   normalizeMessageText,
   requireBoolean,
   requirePosition,
-} = require('../../lib/validation');
+} = require('../../src/lib/validation');
 
 test('usernames are trimmed and limited to 3-24 safe characters', () => {
   assert.equal(normalizeUsername('  Mayank_01 '), 'Mayank_01');

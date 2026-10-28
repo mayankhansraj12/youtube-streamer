@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 
 const DEFAULT_CLIENT_ORIGINS = ['http://localhost:5173', 'http://localhost:8080'];
 const MIN_JWT_SECRET_LENGTH = 16;
