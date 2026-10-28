@@ -29,7 +29,14 @@ import type { RoomServer, RoomSocket, SocketData } from './types.js';
 const SDP_TYPES: ReadonlySet<string> = new Set(['offer', 'answer', 'pranswer', 'rollback']);
 
 type ClientEvent = keyof ClientToServerEvents;
-type ClientEventArgs<E extends ClientEvent> = Parameters<ClientToServerEvents[E]>;
+/** The payload an acknowledged event takes, or `undefined` for an event that takes none. */
+type EventPayload<E extends ClientEvent> = Parameters<ClientToServerEvents[E]> extends [infer P, unknown] ? P : undefined;
+/** The acknowledgement an event takes, which is its last parameter. */
+type EventAck<E extends ClientEvent> = Parameters<ClientToServerEvents[E]> extends [unknown, infer A]
+  ? A
+  : Parameters<ClientToServerEvents[E]> extends [infer A]
+    ? A
+    : never;
 
 function reply<T extends object = Record<string, never>>(ack: Ack<T> | undefined, payload?: T): void {
   if (typeof ack === 'function') ack({ ok: true, ...payload } as AckReply<T>);
@@ -111,18 +118,20 @@ function sanitizeCandidate(value: unknown): IceCandidatePayload | undefined {
 
 /**
  * Wraps a client event handler so that errors become coded acknowledgements instead of
- * crashing the socket. The handler receives the arguments exactly as the client sent them.
+ * crashing the socket. The acknowledgement is the last function a client sends and the payload
+ * is the first thing that is not, so a placeholder for a missing payload cannot hide the reply.
  */
 function guard<E extends ClientEvent>(
   socket: RoomSocket,
   event: E,
-  handler: (...args: ClientEventArgs<E>) => Promise<void>
+  handler: (payload: EventPayload<E>, ack: EventAck<E> | undefined) => Promise<void>
 ) {
-  return async (...args: ClientEventArgs<E>): Promise<void> => {
+  return async (...args: unknown[]): Promise<void> => {
+    const ack = args.findLast((arg) => typeof arg === 'function');
+    const payload = args.find((arg) => typeof arg !== 'function');
     try {
-      await handler(...args);
+      await handler(payload as EventPayload<E>, ack as EventAck<E> | undefined);
     } catch (err) {
-      const ack: unknown = args[args.length - 1];
       if (err instanceof HttpError) {
         fail(ack, err.code, err.message);
         return;
@@ -208,7 +217,7 @@ export function registerRoomHandlers(
 
   socket.on(
     'room:leave',
-    guard(socket, 'room:leave', async (ack) => {
+    guard(socket, 'room:leave', async (_payload, ack) => {
       await leaveRoom(io, socket);
       reply(ack);
     })
