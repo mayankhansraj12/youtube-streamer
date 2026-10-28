@@ -1,0 +1,50 @@
+name: StreamSync CI
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: '**/package-lock.json'
+
+    # SERVER CHECK
+    - name: Install Server Dependencies
+      run: |
+        cd server
+        npm ci
+
+    - name: Lint Server (Optional)
+      run: |
+        # Add lint command if script exists, otherwise skip
+        echo "Skipping server lint for now"
+
+    # CLIENT CHECK
+    - name: Install Client Dependencies
+      run: |
+        cd client
+        npm ci
+
+    - name: Build Client
+      run: |
+        cd client
+        npm run build
+      env:
+        # Mock env var for build
+        VITE_BACKEND_URL: "http://localhost:5000"
