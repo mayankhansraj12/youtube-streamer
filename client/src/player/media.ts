@@ -14,7 +14,7 @@ const MEDIA_ERROR_MESSAGES: Record<number, string> = {
   1: 'Playback was stopped before the media finished loading.',
   2: 'A network error stopped the media from loading.',
   3: 'The media could not be decoded.',
-  4: 'This browser cannot play that media file or stream.',
+  4: 'The media could not be loaded. Check that the link is public and points to a supported audio or video file.',
 };
 
 function describeMediaError(error: MediaError | null): string {
