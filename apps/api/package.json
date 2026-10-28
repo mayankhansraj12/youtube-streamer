@@ -34,10 +34,10 @@
     "tsx": "^4.23.15"
   },
   "description": "StreamSync realtime API: accounts, rooms, synchronized playback and WebRTC signalling",
-  "private": "true",
+  "private": true,
   "license": "MIT",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.12.0"
   },
   "type": "module",
   "files": [
