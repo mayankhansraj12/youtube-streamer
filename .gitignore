@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Environment files (may contain secrets). Templates are kept via .env.example.
+.env
+.env.*
+!.env.example
+
+# Build output and coverage
+dist/
+dist-ssr/
+build/
+coverage/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor and OS files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
