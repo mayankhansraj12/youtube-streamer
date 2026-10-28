@@ -4,7 +4,7 @@ Thanks for taking the time to contribute. This guide covers the development work
 
 ## Getting set up
 
-Follow [Getting started](README.md#getting-started) in the README to run the API and the client locally. The client's test runner needs Node.js 22.12 or newer.
+Follow [Getting started](README.md#getting-started) in the README. In short: enable Corepack, run `pnpm install` at the repository root, copy `apps/api/.env.example` to `apps/api/.env`, and run `pnpm dev`. Node.js 22.12 or newer is required.
 
 ## Workflow
 
@@ -15,23 +15,33 @@ Follow [Getting started](README.md#getting-started) in the README to run the API
 
 ## Checks
 
-Run these before you open a pull request:
+Run this from the repository root before you open a pull request:
 
 ```bash
-cd server && npm test
-cd ../client && npm run lint && npm run typecheck && npm test && npm run build
+pnpm check
 ```
 
-CI runs the same checks on Node.js 22.
+`pnpm check` runs the build, the type checks, ESLint, and the tests, in that order. CI runs the same steps on Node.js 22 with `pnpm install --frozen-lockfile`, and it also builds both container images.
+
+## Repository layout
+
+- `apps/api` is the REST and Socket.IO server.
+- `apps/web` is the React client.
+- `packages/shared` is the contract both sides compile against: REST shapes, realtime event types, error codes, and limits.
+
+A change that touches the wire format starts in `packages/shared/src`, and both apps are updated to match.
 
 ## Code conventions
 
-- **Formatting.** `.editorconfig` sets UTF-8, LF line endings, two-space indentation, and a final newline.
-- **Server.** CommonJS modules. Keep HTTP handling in `src/routes/`, realtime handling in `src/socket/`, and persistence in `src/services/`. Validate every external input through `src/lib/validation.js` or the media parser, and report failures with `HttpError` and a stable `code`.
-- **Client.** TypeScript in strict mode. Hooks own side effects and state; components render. Keep pure logic in `src/lib/` with its unit tests beside it.
+- **Formatting.** `.editorconfig` sets UTF-8, LF line endings, two-space indentation, and a final newline. `.gitattributes` keeps line endings LF in the repository on every platform.
+- **Modules.** Every package is TypeScript with native ES modules (`"type": "module"`). Local imports in the API use the compiled file name, for example `import { loadConfig } from './config.js'`.
+- **API structure.** Feature code lives in `apps/api/src/modules/<feature>/`: the model, the service that talks to the database, and the routes. Socket handling lives in `apps/api/src/realtime/`, HTTP plumbing (error handling, authentication middleware, the `HttpError` type) in `apps/api/src/http/`, and pure helpers in `apps/api/src/lib/`.
+- **Input and errors.** Validate every external input through `apps/api/src/lib/validation.ts` or the media parser, and report failures with `HttpError` and a code from `ERROR_CODES` in `@streamsync/shared`.
+- **Client structure.** Hooks own side effects and state, and components render. Pure logic lives in `apps/web/src/lib/` with its unit tests beside it. Realtime calls use the typed socket in `lib/socket.ts`, so event names and payloads are checked against the contract.
 - **Comments.** Explain why something is done, not what the code does.
-- **Tests.** Add or update a test with every bug fix and every new socket event. Integration tests live in `server/test/integration/` and use an in-memory MongoDB.
-- **Dependencies.** Keep runtime dependencies few. Explain any new dependency in the pull request.
+- **Tests.** Add or update a test with every bug fix and every new socket event. API integration tests live in `apps/api/test/integration/` and use an in-memory MongoDB.
+- **Dependencies.** Add a dependency to the package that uses it, for example `pnpm --filter @streamsync/api add <name>`, and commit the updated `pnpm-lock.yaml` with the change. Keep runtime dependencies few, and explain any new one in the pull request.
+- **Build scripts.** Packages may run install scripts only when they are listed under `allowBuilds` in `pnpm-workspace.yaml`. Add an entry only with a reason in the pull request.
 
 ## Commit messages
 
