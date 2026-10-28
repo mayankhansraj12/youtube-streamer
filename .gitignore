@@ -13,6 +13,9 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Tool caches
+.vite/
+
 # Logs
 logs/
 *.log
