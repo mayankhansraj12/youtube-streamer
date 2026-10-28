@@ -1,10 +1,18 @@
-'use strict';
+export interface RateLimiterOptions {
+  capacity: number;
+  refillPerSecond: number;
+  now?: () => number;
+}
+
+export interface RateLimiter {
+  take(): boolean;
+}
 
 /**
  * Token-bucket limiter used per socket. `take()` returns `true` when the action
  * is allowed and consumes one token, or `false` when the caller is over budget.
  */
-function createRateLimiter({ capacity, refillPerSecond, now = Date.now }) {
+export function createRateLimiter({ capacity, refillPerSecond, now = Date.now }: RateLimiterOptions): RateLimiter {
   let tokens = capacity;
   let updatedAt = now();
 
@@ -20,5 +28,3 @@ function createRateLimiter({ capacity, refillPerSecond, now = Date.now }) {
     },
   };
 }
-
-module.exports = { createRateLimiter };

@@ -1,19 +1,43 @@
-'use strict';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 
-const path = require('node:path');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
+dotenv.config({
+  path: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.env'),
+  quiet: true,
+});
 
-const DEFAULT_CLIENT_ORIGINS = ['http://localhost:5173', 'http://localhost:8080'];
+export const DEFAULT_CLIENT_ORIGINS: readonly string[] = ['http://localhost:5173', 'http://localhost:8080'];
 const MIN_JWT_SECRET_LENGTH = 16;
 
-function parseList(value) {
+export interface Config {
+  env: string;
+  port: number;
+  mongoUri: string;
+  jwtSecret: string;
+  jwtExpiresIn: string;
+  clientOrigins: readonly string[];
+  redisUrl: string | null;
+  trustProxy: boolean | number;
+  maxRoomParticipants: number;
+  authRateLimit: number;
+}
+
+export type EnvSource = Readonly<Record<string, string | undefined>>;
+
+interface IntegerRange {
+  min: number;
+  max: number;
+}
+
+function parseList(value: string | undefined): string[] {
   return String(value || '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
-function readInteger(env, name, fallback, { min, max }) {
+function readInteger(env: EnvSource, name: string, fallback: number, { min, max }: IntegerRange): number {
   const raw = env[name];
   if (raw === undefined || raw === '') return fallback;
 
@@ -24,11 +48,11 @@ function readInteger(env, name, fallback, { min, max }) {
   return value;
 }
 
-function readTrustProxy(env) {
+function readTrustProxy(env: EnvSource): boolean | number {
   const raw = env.TRUST_PROXY;
   if (raw === undefined || raw === '' || raw === 'false') return false;
   if (raw === 'true') return true;
-  return readInteger(env, 'TRUST_PROXY', false, { min: 0, max: 10 });
+  return readInteger(env, 'TRUST_PROXY', 0, { min: 0, max: 10 });
 }
 
 /**
@@ -36,7 +60,7 @@ function readTrustProxy(env) {
  * Throws a descriptive error for anything missing or malformed so that the
  * process fails at boot instead of misbehaving later.
  */
-function loadConfig(env = process.env) {
+export function loadConfig(env: EnvSource = process.env): Config {
   const mongoUri = env.MONGODB_URI;
   if (!mongoUri) {
     throw new Error('MONGODB_URI is required (for example mongodb://localhost:27017/streamsync)');
@@ -62,5 +86,3 @@ function loadConfig(env = process.env) {
     authRateLimit: readInteger(env, 'AUTH_RATE_LIMIT', 30, { min: 1, max: 10000 }),
   };
 }
-
-module.exports = { loadConfig, DEFAULT_CLIENT_ORIGINS };

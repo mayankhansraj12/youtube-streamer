@@ -1,11 +1,9 @@
-'use strict';
-
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const SERVER_SELECTION_TIMEOUT_MS = 10000;
 
-async function connectDatabase(uri) {
-  mongoose.connection.on('error', (err) => {
+export async function connectDatabase(uri: string): Promise<void> {
+  mongoose.connection.on('error', (err: Error) => {
     console.error('MongoDB connection error:', err.message);
   });
 
@@ -13,8 +11,6 @@ async function connectDatabase(uri) {
   console.log(`MongoDB connected: ${mongoose.connection.host}/${mongoose.connection.name}`);
 }
 
-function disconnectDatabase() {
+export function disconnectDatabase(): Promise<void> {
   return mongoose.disconnect();
 }
-
-module.exports = { connectDatabase, disconnectDatabase };

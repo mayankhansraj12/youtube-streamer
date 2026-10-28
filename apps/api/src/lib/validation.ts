@@ -1,34 +1,27 @@
-'use strict';
+import { ERROR_CODES, LIMITS } from '@streamsync/shared';
+import { HttpError } from '../http/http-error.js';
 
-const { HttpError } = require('./httpError');
-const {
-  DEFAULT_ROOM_NAME,
-  MAX_ROOM_NAME_LENGTH,
-  MAX_MESSAGE_LENGTH,
-  MAX_POSITION_SECONDS,
-} = require('./limits');
-
-const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{3,24}$/;
+const USERNAME_PATTERN = new RegExp(`^[A-Za-z0-9_.-]{${LIMITS.minUsernameLength},${LIMITS.maxUsernameLength}}$`);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD_LENGTH = 8;
-const MAX_PASSWORD_BYTES = 72; // bcrypt ignores everything after 72 bytes.
 
 // Control characters, except tab (\x09), line feed (\x0A) and carriage return (\x0D).
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
-const validationError = (message) => new HttpError(400, 'VALIDATION_ERROR', message);
+const validationError = (message: string): HttpError => new HttpError(400, ERROR_CODES.VALIDATION_ERROR, message);
 
-function normalizeUsername(value) {
+export function normalizeUsername(value: unknown): string {
   const username = typeof value === 'string' ? value.trim() : '';
   if (!USERNAME_PATTERN.test(username)) {
-    throw validationError('Username must be 3-24 characters: letters, numbers, underscores, dots or hyphens');
+    throw validationError(
+      `Username must be ${LIMITS.minUsernameLength}-${LIMITS.maxUsernameLength} characters: letters, numbers, underscores, dots or hyphens`
+    );
   }
   return username;
 }
 
 /** Email is optional. Blank input becomes `undefined` so the sparse unique index ignores it. */
-function normalizeEmail(value) {
+export function normalizeEmail(value: unknown): string | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   const email = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (email.length > 254 || !EMAIL_PATTERN.test(email)) {
@@ -37,29 +30,30 @@ function normalizeEmail(value) {
   return email;
 }
 
-function validatePassword(value) {
-  if (typeof value !== 'string' || value.length < MIN_PASSWORD_LENGTH) {
-    throw validationError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+export function validatePassword(value: unknown): string {
+  if (typeof value !== 'string' || value.length < LIMITS.minPasswordLength) {
+    throw validationError(`Password must be at least ${LIMITS.minPasswordLength} characters`);
   }
-  if (Buffer.byteLength(value, 'utf8') > MAX_PASSWORD_BYTES) {
-    throw validationError(`Password must be at most ${MAX_PASSWORD_BYTES} bytes`);
+  // bcrypt ignores everything after 72 bytes, so the limit is counted in bytes.
+  if (Buffer.byteLength(value, 'utf8') > LIMITS.maxPasswordBytes) {
+    throw validationError(`Password must be at most ${LIMITS.maxPasswordBytes} bytes`);
   }
   return value;
 }
 
-function stripControlCharacters(value) {
+function stripControlCharacters(value: string): string {
   return value.replace(CONTROL_CHARACTERS, '');
 }
 
-function normalizeRoomName(value) {
-  if (value === undefined || value === null || value === '') return DEFAULT_ROOM_NAME;
+export function normalizeRoomName(value: unknown): string {
+  if (value === undefined || value === null || value === '') return LIMITS.defaultRoomName;
   if (typeof value !== 'string') throw validationError('Room name must be text');
 
-  const name = stripControlCharacters(value).replace(/\s+/g, ' ').trim().slice(0, MAX_ROOM_NAME_LENGTH);
-  return name || DEFAULT_ROOM_NAME;
+  const name = stripControlCharacters(value).replace(/\s+/g, ' ').trim().slice(0, LIMITS.maxRoomNameLength);
+  return name || LIMITS.defaultRoomName;
 }
 
-function normalizeMessageText(value, maxLength = MAX_MESSAGE_LENGTH) {
+export function normalizeMessageText(value: unknown, maxLength = LIMITS.maxMessageLength): string {
   if (typeof value !== 'string') throw validationError('Message must be text');
 
   const text = stripControlCharacters(value.replace(/\r\n?/g, '\n')).trim();
@@ -68,24 +62,14 @@ function normalizeMessageText(value, maxLength = MAX_MESSAGE_LENGTH) {
   return text;
 }
 
-function requireBoolean(value, name) {
+export function requireBoolean(value: unknown, name: string): boolean {
   if (typeof value !== 'boolean') throw validationError(`${name} must be true or false`);
   return value;
 }
 
-function requirePosition(value) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_POSITION_SECONDS) {
+export function requirePosition(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > LIMITS.maxPositionSeconds) {
     throw validationError('Position must be a number of seconds');
   }
   return value;
 }
-
-module.exports = {
-  normalizeUsername,
-  normalizeEmail,
-  validatePassword,
-  normalizeRoomName,
-  normalizeMessageText,
-  requireBoolean,
-  requirePosition,
-};
