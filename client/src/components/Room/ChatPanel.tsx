@@ -1,94 +1,157 @@
-import { useState } from 'react';
-import type { FC, FormEvent, MutableRefObject } from 'react';
-import { FaPaperPlane, FaCopy, FaCheck } from 'react-icons/fa';
-
-interface ChatMessage {
-    user: string;
-    text: string;
-    time: string;
-    isSystem?: boolean;
-}
+import { useEffect, useRef, useState, type FormEvent, type UIEvent } from 'react';
+import { FaPaperPlane } from 'react-icons/fa';
+import { LIMITS } from '../../config';
+import { getErrorMessage } from '../../lib/api';
+import { formatTimeOfDay } from '../../lib/format';
+import { splitLinks } from '../../lib/links';
+import type { ChatItem } from '../../types';
 
 interface ChatPanelProps {
-    roomId: string; // Added roomId
-    messages: ChatMessage[];
-    username: string;
-    msgInput: string;
-    setMsgInput: (val: string) => void;
-    handleSendMessage: (e?: FormEvent) => void;
-    chatEndRef: MutableRefObject<HTMLDivElement | null>;
+  items: ChatItem[];
+  selfUserId: string;
+  onSend: (text: string) => Promise<void>;
 }
 
-const ChatPanel: FC<ChatPanelProps> = ({ roomId, messages, username, msgInput, setMsgInput, handleSendMessage, chatEndRef }) => {
-    const [copied, setCopied] = useState(false);
+const LOW_ALLOWANCE = 100;
 
-    const copyRoomId = () => {
-        navigator.clipboard.writeText(roomId);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
+/** Room chat. Auto-scrolls only while the reader is at the bottom, so reading history is never interrupted. */
+export default function ChatPanel({ items, selfUserId, onSend }: ChatPanelProps) {
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
 
-    return (
-        <div className="h-full flex flex-col relative bg-brand-surface border-l border-white/5 font-sans">
-            {/* Header */}
-            <div className="absolute top-0 left-0 right-0 z-10 bg-brand-surface/90 border-b border-white/5 p-4 flex items-center justify-between backdrop-blur-md">
-                <span className="text-xs font-bold text-brand-dim uppercase tracking-wider">Room Code</span>
-                <div
-                    className="flex items-center gap-3 bg-gradient-to-b from-white/10 to-transparent px-3 py-1.5 rounded-lg border border-white/10 hover:border-brand-purple/30 transition-all cursor-pointer group active:scale-95 shadow-sm"
-                    onClick={copyRoomId}
-                    title="Copy Room ID"
-                >
-                    <span className="font-mono text-sm text-brand-text font-semibold">{roomId}</span>
-                    {copied ? <FaCheck size={12} className="text-brand-cyan" /> : <FaCopy size={12} className="text-brand-dim group-hover:text-white transition-colors" />}
+  useEffect(() => {
+    const list = listRef.current;
+    if (list && pinnedRef.current) list.scrollTop = list.scrollHeight;
+  }, [items]);
+
+  const handleScroll = (event: UIEvent<HTMLDivElement>) => {
+    const element = event.currentTarget;
+    pinnedRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!text || sending) return;
+
+    setSending(true);
+    setError(null);
+    try {
+      await onSend(text);
+      setDraft('');
+      pinnedRef.current = true;
+    } catch (caught) {
+      setError(getErrorMessage(caught, 'Your message could not be sent.'));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const remaining = LIMITS.maxMessageLength - draft.length;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div
+        ref={listRef}
+        onScroll={handleScroll}
+        role="log"
+        aria-live="polite"
+        aria-label="Chat messages"
+        className="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-4"
+      >
+        {items.length === 0 && (
+          <p className="pt-10 text-center text-sm text-white/40">No messages yet. Say hello to the room.</p>
+        )}
+
+        {items.map((item, index) => {
+          if (item.kind === 'system') {
+            return (
+              <p key={item.id} className="py-1 text-center text-xs italic text-white/40">
+                {item.text}
+              </p>
+            );
+          }
+
+          const mine = item.userId === selfUserId;
+          const previous = items[index - 1];
+          const startsGroup = !previous || previous.kind !== 'message' || previous.userId !== item.userId;
+
+          return (
+            <div key={item.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+              {startsGroup && (
+                <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-white/50">
+                  <span className="font-semibold uppercase tracking-wide">{mine ? 'You' : item.username}</span>
+                  <time dateTime={new Date(item.createdAt).toISOString()}>{formatTimeOfDay(item.createdAt)}</time>
                 </div>
-            </div>
-
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-20 space-y-4 custom-scrollbar">
-                {messages.length === 0 && (
-                    <div className="h-full flex flex-col items-center justify-center text-brand-dim text-sm space-y-2 opacity-60">
-                        <p className="font-medium">No messages yet.</p>
-                        <p className="text-xs">Start the conversation!</p>
-                    </div>
+              )}
+              <div
+                className={`max-w-[85%] break-words rounded-2xl px-3.5 py-2 text-sm ${
+                  mine
+                    ? 'rounded-tr-sm bg-white font-medium text-black'
+                    : 'rounded-tl-sm border border-white/5 bg-brand-black/60 text-white'
+                }`}
+              >
+                {splitLinks(item.text).map((segment, segmentIndex) =>
+                  segment.type === 'link' ? (
+                    <a
+                      key={segmentIndex}
+                      href={segment.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="break-all underline underline-offset-2"
+                    >
+                      {segment.value}
+                    </a>
+                  ) : (
+                    <span key={segmentIndex} className="whitespace-pre-wrap">
+                      {segment.value}
+                    </span>
+                  )
                 )}
-                {messages.map((m, i) => (
-                    <div key={i} className={`flex flex-col ${m.user === username ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                        {!m.isSystem && (
-                            <div className="flex items-center gap-2 mb-1 px-1">
-                                <span className="text-[10px] text-brand-dim font-bold uppercase tracking-wider">{m.user === username ? 'You' : m.user}</span>
-                                {m.time && <span className="text-[10px] text-brand-dim/50">{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
-                            </div>
-                        )}
-                        <div className={`px-4 py-2.5 max-w-[85%] text-sm break-words shadow-sm ${m.isSystem ? 'bg-transparent text-brand-dim text-xs italic text-center w-full shadow-none my-2'
-                            : m.user === username
-                                ? 'bg-brand-text text-brand-black font-medium rounded-2xl rounded-tr-sm'
-                                : 'bg-brand-black/50 border border-white/5 text-brand-text rounded-2xl rounded-tl-sm'
-                            }`}>
-                            {m.text}
-                        </div>
-                    </div>
-                ))}
-                <div ref={chatEndRef}></div>
+              </div>
             </div>
+          );
+        })}
+      </div>
 
-            {/* Input Area */}
-            <form onSubmit={handleSendMessage} className="p-4 bg-brand-surface border-t border-white/5 flex gap-3 shrink-0 z-20 relative">
-                <input
-                    className="flex-1 bg-brand-black/50 border border-white/5 rounded-2xl px-5 py-3 text-sm focus:outline-none focus:border-brand-cyan/30 focus:bg-brand-black transition-all placeholder-brand-dim text-brand-text"
-                    placeholder="Type a message..."
-                    value={msgInput}
-                    onChange={(e) => setMsgInput(e.target.value)}
-                />
-                <button
-                    type="submit"
-                    className="bg-brand-text hover:bg-white text-brand-black p-3.5 rounded-2xl transition-all disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed shadow-lg hover:shadow-xl active:scale-95 flex items-center justify-center"
-                    disabled={!msgInput.trim()}
-                >
-                    <FaPaperPlane size={16} />
-                </button>
-            </form>
+      <form onSubmit={submit} className="border-t border-white/5 p-3">
+        <label htmlFor="chat-input" className="sr-only">
+          Message
+        </label>
+        <div className="flex gap-2">
+          <input
+            id="chat-input"
+            value={draft}
+            maxLength={LIMITS.maxMessageLength}
+            autoComplete="off"
+            placeholder="Send a message"
+            onChange={(event) => {
+              setDraft(event.target.value);
+              if (error) setError(null);
+            }}
+            className="min-w-0 flex-1 rounded-xl border border-white/5 bg-brand-black/60 px-4 py-2.5 text-sm text-white placeholder-white/30 focus:border-brand-cyan/40 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={sending || draft.trim() === ''}
+            aria-label="Send message"
+            className="flex shrink-0 items-center justify-center rounded-xl bg-white px-4 text-black transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <FaPaperPlane size={13} aria-hidden="true" />
+          </button>
         </div>
-    );
-};
-
-export default ChatPanel;
+        <div className="mt-1 flex min-h-4 justify-between text-[11px]">
+          <span role="alert" className="text-red-400">
+            {error ?? ''}
+          </span>
+          {remaining <= LOW_ALLOWANCE && (
+            <span className={remaining < 20 ? 'text-amber-300' : 'text-white/40'}>{remaining} characters left</span>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}

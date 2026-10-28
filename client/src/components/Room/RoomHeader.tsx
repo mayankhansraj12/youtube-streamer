@@ -1,58 +1,85 @@
-import type { FC } from 'react';
-import { FaVideo } from 'react-icons/fa';
+import { FaCopy, FaLink, FaSignOutAlt, FaStop, FaUsers, FaVideo } from 'react-icons/fa';
 
 interface RoomHeaderProps {
-    roomName: string;
-    inputUrl: string;
-    setInputUrl: (val: string) => void;
-    submitUrl: () => void;
-    roomOwner: string;
-    username: string;
-    setShowDeleteModal: (val: boolean) => void;
-    setShowLeaveModal: (val: boolean) => void;
+  roomName: string;
+  roomCode: string;
+  participantCount: number;
+  isOwner: boolean;
+  connected: boolean;
+  onCopyCode: () => void;
+  onShare: () => void;
+  onLeave: () => void;
+  onEnd: () => void;
 }
 
-const RoomHeader: FC<RoomHeaderProps> = ({
-    roomName, inputUrl, setInputUrl, submitUrl, roomOwner, username, setShowDeleteModal, setShowLeaveModal
-}) => {
-    return (
-        <header className="h-16 lg:h-20 flex items-center justify-between px-4 lg:px-8 relative lg:absolute lg:top-0 lg:left-0 lg:right-0 z-50 pointer-events-none font-sans">
-            <div className="pointer-events-auto flex items-center gap-3 bg-brand-surface/80 backdrop-blur-xl px-4 py-2 rounded-full border border-white/5 shadow-glass scale-90 lg:scale-100 origin-left hover:bg-brand-surface/90 transition-all">
-                <div className="bg-gradient-to-tr from-brand-cyan to-brand-purple p-2 rounded-full shadow-lg">
-                    <FaVideo className="text-white text-xs lg:text-sm" />
-                </div>
-                <div className="flex flex-col">
-                    <span className="font-bold text-sm text-brand-text tracking-tight">{roomName || 'Untitled Room'}</span>
-                </div>
-            </div>
+const chipButton =
+  'inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 hover:text-white';
 
-            {/* URL Bar - Hidden on mobile, visible on desktop */}
-            <div className="pointer-events-auto hidden md:flex items-center gap-2 bg-brand-surface/80 backdrop-blur-xl p-1.5 rounded-2xl border border-white/5 w-96 max-w-lg shadow-glass hover:shadow-2xl transition-all group focus-within:ring-1 focus-within:ring-brand-cyan/30">
-                <input
-                    className="flex-1 bg-transparent border-none text-sm px-4 focus:outline-none placeholder-brand-dim/50 text-brand-text font-medium"
-                    placeholder="Paste YouTube Link..."
-                    value={inputUrl}
-                    onChange={(e) => setInputUrl(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && submitUrl()}
-                />
-                <button onClick={submitUrl} className="bg-brand-text hover:bg-white text-black px-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wider hover:shadow-lg transition-all">
-                    Play
-                </button>
-            </div>
+export default function RoomHeader({
+  roomName,
+  roomCode,
+  participantCount,
+  isOwner,
+  connected,
+  onCopyCode,
+  onShare,
+  onLeave,
+  onEnd,
+}: RoomHeaderProps) {
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-brand-black/80 px-4 py-3 backdrop-blur-md lg:px-6">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-brand-cyan to-brand-purple">
+          <div className="flex h-[calc(100%-2px)] w-[calc(100%-2px)] items-center justify-center rounded-[10px] bg-brand-black">
+            <FaVideo size={12} className="text-white" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-bold text-white" title={roomName}>
+            {roomName}
+          </h1>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-dim">
+            <button
+              type="button"
+              onClick={onCopyCode}
+              title="Copy room code"
+              className="inline-flex items-center gap-1.5 rounded-md border border-white/10 px-2 py-0.5 font-mono text-white/80 hover:border-white/30 hover:text-white"
+            >
+              {roomCode}
+              <FaCopy size={10} aria-hidden="true" />
+            </button>
+            <span className="inline-flex items-center gap-1">
+              <FaUsers size={10} aria-hidden="true" />
+              <span aria-label={`${participantCount} in the room`}>{participantCount}</span>
+            </span>
+            <span className={`inline-flex items-center gap-1.5 ${connected ? 'text-emerald-400' : 'text-amber-400'}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-amber-400'}`} aria-hidden="true" />
+              {connected ? 'Live' : 'Reconnecting'}
+            </span>
+          </div>
+        </div>
+      </div>
 
-            <div className="pointer-events-auto flex items-center gap-2">
-                {roomOwner === username ? (
-                    <button className="bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 px-4 py-2 rounded-full transition-all border border-red-500/10 text-xs lg:text-sm font-semibold backdrop-blur-md" onClick={() => setShowDeleteModal(true)}>
-                        End Room
-                    </button>
-                ) : (
-                    <button className="bg-white/5 hover:bg-white/10 text-brand-dim hover:text-white px-4 py-2 rounded-full transition-all border border-white/5 text-xs lg:text-sm font-semibold backdrop-blur-md" onClick={() => setShowLeaveModal(true)}>
-                        Leave
-                    </button>
-                )}
-            </div>
-        </header>
-    );
-};
-
-export default RoomHeader;
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={onShare} className={chipButton} title="Copy invite link">
+          <FaLink size={11} aria-hidden="true" />
+          Share
+        </button>
+        <button type="button" onClick={onLeave} className={chipButton}>
+          <FaSignOutAlt size={11} aria-hidden="true" />
+          Leave
+        </button>
+        {isOwner && (
+          <button
+            type="button"
+            onClick={onEnd}
+            className="inline-flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-500/20"
+          >
+            <FaStop size={10} aria-hidden="true" />
+            End room
+          </button>
+        )}
+      </div>
+    </header>
+  );
+}

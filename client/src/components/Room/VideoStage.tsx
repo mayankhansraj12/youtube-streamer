@@ -1,154 +1,131 @@
-import { useState, useRef, useEffect } from 'react';
-import type { MutableRefObject, FC, ChangeEvent, MouseEvent } from 'react';
-import { FaVideo } from 'react-icons/fa';
-import ControlBar from './ControlBar';
-
-// --- NATIVE YOUTUBE PLAYER COMPONENT ---
-const NativeYouTubePlayer = ({
-    videoId,
-    playing,
-    seekTo,
-    onProgress,
-    onDuration,
-    onStateChange,
-    playerInstanceRef
-}: {
-    videoId: string,
-    playing: boolean,
-    seekTo: number | null,
-    onProgress: (time: number) => void,
-    onDuration: (duration: number) => void,
-    onStateChange: (state: number) => void,
-    playerInstanceRef: MutableRefObject<any>
-}) => {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const [apiReady, setApiReady] = useState(false);
-    const onStateChangeRef = useRef(onStateChange);
-
-    useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
-
-    useEffect(() => {
-        if (!(window as any).YT) {
-            const tag = document.createElement('script');
-            tag.src = "https://www.youtube.com/iframe_api";
-            const firstScriptTag = document.getElementsByTagName('script')[0];
-            firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
-            (window as any).onYouTubeIframeAPIReady = () => setApiReady(true);
-        } else {
-            setApiReady(true);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (apiReady && containerRef.current && !playerInstanceRef.current && videoId) {
-            playerInstanceRef.current = new (window as any).YT.Player(containerRef.current, {
-                height: '100%',
-                width: '100%',
-                videoId: videoId,
-                playerVars: {
-                    'playsinline': 1, 'controls': 0, 'disablekb': 1, 'rel': 0,
-                    'modestbranding': 1, 'origin': window.location.origin,
-                    'iv_load_policy': 3 // Hide annotations
-                },
-                events: {
-                    'onReady': (event: any) => { if (playing) event.target.playVideo(); },
-                    'onStateChange': (event: any) => {
-                        if (onStateChangeRef.current) onStateChangeRef.current(event.data);
-                        if (event.data === 1 && event.target.getDuration) onDuration(event.target.getDuration());
-                    }
-                }
-            });
-        }
-    }, [apiReady, videoId]);
-
-    // External Control Sync
-    useEffect(() => { if (playerInstanceRef.current?.loadVideoById && videoId) playerInstanceRef.current.loadVideoById(videoId); }, [videoId]);
-    useEffect(() => { if (playerInstanceRef.current?.playVideo) playing ? playerInstanceRef.current.playVideo() : playerInstanceRef.current.pauseVideo(); }, [playing]);
-    useEffect(() => { if (seekTo !== null && playerInstanceRef.current?.seekTo) playerInstanceRef.current.seekTo(seekTo, true); }, [seekTo]);
-
-    // Poller
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (playerInstanceRef.current?.getCurrentTime) {
-                const t = playerInstanceRef.current.getCurrentTime();
-                onProgress(t);
-                const d = playerInstanceRef.current.getDuration();
-                if (d) onDuration(d);
-            }
-        }, 500);
-        return () => clearInterval(interval);
-    }, []);
-
-    return <div ref={containerRef} className="w-full h-full" />;
-};
+import type { RefObject } from 'react';
+import { FaPlay, FaVideo } from 'react-icons/fa';
+import type { PlayerAdapter } from '../../player/types';
+import PlayerControls from './PlayerControls';
 
 interface VideoStageProps {
-    videoId: string;
-    playing: boolean;
-    seekTrigger: number | null;
-    isDragging: boolean;
-    setCurrentTime: (t: number) => void;
-    setDuration: (d: number) => void;
-    handlePlayerStateChange: (state: number) => void;
-    playerInstanceRef: MutableRefObject<any>;
-    handleTogglePlay: () => void;
-    currentTime: number;
-    duration: number;
-    handleSeek: (e: ChangeEvent<HTMLInputElement>) => void;
-    handleSeekEnd: (e: MouseEvent<HTMLInputElement>) => void;
-    handleFullscreen: () => void;
-    isFullscreen: boolean;
-    inputUrl: string;
-    setInputUrl: (url: string) => void;
-    submitUrl: () => void;
-    videoContainerRef: MutableRefObject<HTMLDivElement | null>;
+  stageRef: RefObject<HTMLElement | null>;
+  containerRef: RefObject<HTMLDivElement | null>;
+  hasSource: boolean;
+  isAudio: boolean;
+  adapter: PlayerAdapter | null;
+  playing: boolean;
+  loading: boolean;
+  buffering: boolean;
+  blocked: boolean;
+  error: string | null;
+  volume: number;
+  quality: string;
+  isFullscreen: boolean;
+  onResume: () => void;
+  onTogglePlay: () => void;
+  onSeek: (seconds: number) => void;
+  onVolumeChange: (volume: number) => void;
+  onQualityChange: (quality: string) => void;
+  onToggleFullscreen: () => void;
 }
 
-const VideoStage: FC<VideoStageProps> = ({
-    videoId, playing, seekTrigger, isDragging, setCurrentTime, setDuration,
-    handlePlayerStateChange, playerInstanceRef, handleTogglePlay, currentTime, duration,
-    handleSeek, handleSeekEnd, handleFullscreen, isFullscreen, inputUrl, setInputUrl, submitUrl, videoContainerRef
-}) => {
-    return (
-        <div className="flex-1 flex items-start justify-center pt-4 lg:pt-24 pb-4 px-4 lg:px-10 relative bg-black/50" ref={videoContainerRef}>
-            <div className="w-full h-full max-w-6xl aspect-video bg-black relative rounded-xl lg:rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/5 ring-1 ring-white/5 group">
-                {videoId ? (
-                    <>
-                        <NativeYouTubePlayer
-                            videoId={videoId} playing={playing} seekTo={seekTrigger}
-                            onProgress={(t) => !isDragging && setCurrentTime(t)}
-                            onDuration={setDuration} onStateChange={handlePlayerStateChange}
-                            playerInstanceRef={playerInstanceRef}
-                        />
-                        <div className="absolute inset-0 z-10" onClick={handleTogglePlay}></div>
-                        <ControlBar
-                            playing={playing} currentTime={currentTime} duration={duration}
-                            onTogglePlay={handleTogglePlay} onSeek={handleSeek} onSeekEnd={handleSeekEnd}
-                            onFullscreen={handleFullscreen}
-                            isFullscreen={isFullscreen}
-                        />
-                    </>
-                ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">
-                        <div className="p-4 lg:p-6 rounded-full bg-white/5 mb-4 animate-pulse"><FaVideo size={30} className="opacity-20 lg:w-10 lg:h-10" /></div>
-                        <p className="text-gray-400 font-light text-sm lg:text-base">Waiting for video...</p>
-                        {/* Mobile Input for Video if URL Bar is hidden */}
-                        <div className="md:hidden mt-4 w-3/4 flex gap-2">
-                            <input
-                                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none"
-                                placeholder="Paste Link..."
-                                value={inputUrl}
-                                onChange={(e) => setInputUrl(e.target.value)}
-                            />
-                            <button onClick={submitUrl} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-xs font-bold">
-                                GO
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
+/** The shared player surface: the media itself, status overlays, and the transport bar. */
+export default function VideoStage({
+  stageRef,
+  containerRef,
+  hasSource,
+  isAudio,
+  adapter,
+  playing,
+  loading,
+  buffering,
+  blocked,
+  error,
+  volume,
+  quality,
+  isFullscreen,
+  onResume,
+  onTogglePlay,
+  onSeek,
+  onVolumeChange,
+  onQualityChange,
+  onToggleFullscreen,
+}: VideoStageProps) {
+  return (
+    <section
+      ref={stageRef}
+      aria-label="Shared player"
+      className="relative h-[42vh] w-full shrink-0 overflow-hidden bg-black lg:h-auto lg:min-h-0 lg:flex-1"
+    >
+      <div ref={containerRef} className="absolute inset-0" />
 
-export default VideoStage;
+      {!hasSource && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+          <div className="rounded-full bg-white/5 p-5">
+            <FaVideo size={26} className="text-white/40" aria-hidden="true" />
+          </div>
+          <p className="max-w-sm text-sm text-white/60">
+            Nothing is playing yet. Paste a YouTube link or a direct media URL above to start watching together.
+          </p>
+        </div>
+      )}
+
+      {hasSource && isAudio && !loading && !error && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-gradient-to-br from-brand-purple/30 to-brand-cyan/20">
+          <span className="text-sm uppercase tracking-widest text-white/70">Audio playing</span>
+        </div>
+      )}
+
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+          <span
+            role="status"
+            aria-label="Loading media"
+            className="h-8 w-8 animate-spin rounded-full border-2 border-white/10 border-t-brand-cyan"
+          />
+        </div>
+      )}
+
+      {error && (
+        <div
+          role="alert"
+          className="absolute inset-x-4 top-1/2 -translate-y-1/2 rounded-xl border border-red-500/30 bg-black/85 p-4 text-center text-sm text-red-300"
+        >
+          {error}
+        </div>
+      )}
+
+      {blocked && !error && (
+        <button
+          type="button"
+          onClick={onResume}
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60 text-white"
+        >
+          <span className="rounded-full bg-white p-5 text-black">
+            <FaPlay size={20} aria-hidden="true" />
+          </span>
+          <span className="text-sm">Autoplay was blocked by your browser. Select to start playback.</span>
+        </button>
+      )}
+
+      {buffering && !loading && !blocked && (
+        <span
+          role="status"
+          aria-label="Buffering"
+          className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-white/10 border-t-white"
+        />
+      )}
+
+      {adapter && (
+        <PlayerControls
+          adapter={adapter}
+          playing={playing}
+          volume={volume}
+          quality={quality}
+          isFullscreen={isFullscreen}
+          onTogglePlay={onTogglePlay}
+          onSeek={onSeek}
+          onVolumeChange={onVolumeChange}
+          onQualityChange={onQualityChange}
+          onToggleFullscreen={onToggleFullscreen}
+        />
+      )}
+    </section>
+  );
+}

@@ -1,64 +1,85 @@
-import type { FC } from 'react';
-import { FaMicrophoneSlash } from 'react-icons/fa';
-import SimplePeer from 'simple-peer';
-
-interface PeerData {
-    peerId: string;
-    peer: SimplePeer.Instance;
-    username: string;
-    isMuted: boolean;
-    stream?: MediaStream;
-}
+import { FaMicrophone, FaMicrophoneSlash, FaUserMinus } from 'react-icons/fa';
+import type { LevelReading } from '../../hooks/useAudioLevels';
+import { SELF_LEVEL_ID } from '../../hooks/useVoiceChat';
+import { initialOf } from '../../lib/format';
+import type { Participant } from '../../types';
 
 interface ParticipantListProps {
-    peers: PeerData[];
-    username: string;
-    roomOwner: string;
-    muted: boolean;
+  participants: Participant[];
+  ownerId: string;
+  selfSocketId: string | null;
+  viewerIsOwner: boolean;
+  levels: Record<string, LevelReading>;
+  onRemove: (participant: Participant) => void;
 }
 
-const ParticipantList: FC<ParticipantListProps> = ({ peers, username, roomOwner, muted }) => {
-    return (
-        <div className="absolute inset-0 overflow-y-auto p-4 space-y-3 custom-scrollbar flex flex-col bg-brand-surface border-l border-white/5 font-sans">
+/** Everyone in the room with live speaking indicators. The host can remove other participants. */
+export default function ParticipantList({
+  participants,
+  ownerId,
+  selfSocketId,
+  viewerIsOwner,
+  levels,
+  onRemove,
+}: ParticipantListProps) {
+  const ordered = [...participants].sort(
+    (a, b) => Number(b.userId === ownerId) - Number(a.userId === ownerId) || a.joinedAt - b.joinedAt
+  );
 
-            <div className="flex items-center gap-3 p-3 rounded-2xl bg-brand-black/20 border border-white/5 relative overflow-hidden group">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-cyan to-brand-purple flex items-center justify-center font-bold text-white shadow-glow-cyan text-sm">
-                    {username?.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                        <span className="font-bold text-brand-text text-sm">{username} (You)</span>
-                        {roomOwner === username && <span className="text-[10px] bg-brand-purple/10 text-brand-purple border border-brand-purple/20 px-2 py-0.5 rounded-full font-semibold">Owner</span>}
-                    </div>
-                    <span className="text-xs text-brand-cyan/80 flex items-center gap-1.5 font-medium">
-                        <div className="w-1.5 h-1.5 bg-brand-cyan rounded-full shadow-glow-cyan"></div>
-                        Online {muted && <span className="text-brand-dim text-[10px]">• Muted</span>}
-                    </span>
-                </div>
+  return (
+    <ul aria-label="People in this room" className="custom-scrollbar h-full space-y-1 overflow-y-auto p-3">
+      {ordered.map((participant) => {
+        const isSelf = participant.socketId === selfSocketId;
+        const isHost = participant.userId === ownerId;
+        const level = levels[isSelf ? SELF_LEVEL_ID : participant.socketId];
+        const speaking = !participant.muted && level?.speaking === true;
+        const status = participant.muted ? 'Muted' : speaking ? 'Speaking' : 'Mic on';
+
+        return (
+          <li key={participant.socketId} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/5">
+            <div
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-cyan/40 to-brand-purple/40 text-sm font-bold text-white transition ${
+                speaking ? 'ring-2 ring-emerald-400' : ''
+              }`}
+              aria-hidden="true"
+            >
+              {initialOf(participant.username)}
             </div>
 
-            {peers.map((peer) => (
-                <div key={peer.peerId} className="flex items-center gap-3 p-3 rounded-2xl hover:bg-white/5 border border-transparent hover:border-white/5 transition-all">
-                    <div className="w-10 h-10 rounded-full bg-brand-black/50 flex items-center justify-center font-bold text-brand-dim border border-white/5 text-sm">
-                        {peer.username ? peer.username.charAt(0).toUpperCase() : '?'}
-                    </div>
-                    <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
-                            <span className="font-semibold text-brand-text text-sm">{peer.username || 'Connecting...'}</span>
-                            {roomOwner === peer.username && <span className="text-[10px] bg-brand-purple/10 text-brand-purple border border-brand-purple/20 px-2 py-0.5 rounded-full font-semibold">Owner</span>}
-                        </div>
-                        <span className="text-xs text-brand-dim flex items-center gap-1.5">
-                            {peer.isMuted ? <FaMicrophoneSlash className="text-red-400" size={10} /> : <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>}
-                            {peer.isMuted ? 'Muted' : 'Speaking'}
-                        </span>
-                    </div>
-                </div>
-            ))}
-            <div className="mt-8 px-8 text-center opacity-50">
-                <p className="text-xs text-gray-500">Invite friends by sharing the URL</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-semibold text-white">{participant.username}</span>
+                {isSelf && <span className="text-[10px] font-semibold uppercase tracking-wide text-white/50">You</span>}
+                {isHost && (
+                  <span className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-semibold text-brand-purple">
+                    Host
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-white/50">
+                {participant.muted ? (
+                  <FaMicrophoneSlash size={9} className="text-red-400" aria-hidden="true" />
+                ) : (
+                  <FaMicrophone size={9} className="text-emerald-400" aria-hidden="true" />
+                )}
+                <span>{status}</span>
+              </div>
             </div>
-        </div>
-    );
-};
 
-export default ParticipantList;
+            {viewerIsOwner && !isSelf && (
+              <button
+                type="button"
+                onClick={() => onRemove(participant)}
+                aria-label={`Remove ${participant.username} from the room`}
+                title="Remove from room"
+                className="rounded-lg p-2 text-white/50 transition hover:bg-red-500/10 hover:text-red-300"
+              >
+                <FaUserMinus size={12} aria-hidden="true" />
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
