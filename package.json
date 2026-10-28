@@ -1,0 +1,27 @@
+{
+  "name": "streamsync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StreamSync: a real-time watch party with synchronized media, voice and chat",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm --filter @streamsync/shared run build && pnpm --parallel --filter @streamsync/api --filter @streamsync/web run dev",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "check": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.48.0"
+  }
+}
