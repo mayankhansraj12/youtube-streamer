@@ -13,7 +13,9 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.2.1",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "redis": "^4.6.10",
+    "@socket.io/redis-adapter": "^8.2.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"

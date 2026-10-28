@@ -7,6 +7,7 @@ const RoomSchema = new mongoose.Schema({
         unique: true
     },
     owner: { type: String }, // Username of the room creator
+    name: { type: String, default: '' }, // Friendly name for the room
     users: [{
         username: String,
         socketId: String,

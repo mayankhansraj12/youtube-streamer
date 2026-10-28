@@ -10,12 +10,30 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
+const { createAdapter } = require('@socket.io/redis-adapter');
+const { createClient } = require('redis');
+
 const io = new Server(server, {
   cors: {
     origin: '*', // Allow all origins for now, will restrict later
     methods: ['GET', 'POST']
   }
 });
+
+// Redis Adapter for Scalability
+if (process.env.REDIS_URL) {
+  (async () => {
+    try {
+      const pubClient = createClient({ url: process.env.REDIS_URL });
+      const subClient = pubClient.duplicate();
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log('✅ Redis Adapter connected via ' + process.env.REDIS_URL);
+    } catch (e) {
+      console.error('❌ Redis Adapter Error:', e);
+    }
+  })();
+}
 
 app.use(cors());
 app.use(express.json());
@@ -61,6 +79,7 @@ io.on('connection', (socket) => {
         // Sync State to Joiner
         socket.emit('room-sync', {
             owner: room.owner,
+            name: room.name || "Untitled Room",
             users: room.users,
             messages: room.messages || [],
             videoState: room.videoState || {}
@@ -80,7 +99,7 @@ io.on('connection', (socket) => {
   });
 
   // Create NEW room
-  socket.on('create-room', async (rawRoomId, username) => {
+  socket.on('create-room', async (rawRoomId, username, roomName) => {
       const roomId = rawRoomId.trim();
       
       try {
@@ -93,6 +112,7 @@ io.on('connection', (socket) => {
         const room = new Room({ 
             roomId, 
             owner: username, 
+            name: roomName || "Untitled Room",
             users: [{ username, socketId: socket.id, isMuted: true }], 
             messages: [], 
             videoState: {} 
@@ -103,6 +123,7 @@ io.on('connection', (socket) => {
         
         socket.emit('room-sync', {
             owner: room.owner,
+            name: room.name,
             users: room.users,
             messages: room.messages,
             videoState: room.videoState
