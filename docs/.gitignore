@@ -1,0 +1,4 @@
+# Local-only documentation. Everything in this folder stays out of version control,
+# except this ignore file itself.
+*
+!.gitignore
