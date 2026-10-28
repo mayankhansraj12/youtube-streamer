@@ -1,136 +1,174 @@
-import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, type FormEvent } from 'react';
+import toast from 'react-hot-toast';
+import { FaArrowRight, FaMagic, FaSignOutAlt, FaYoutube } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
-import { FaYoutube, FaMagic, FaPlay, FaSignOutAlt } from 'react-icons/fa';
-import { useAuth } from '../context/AuthContext';
+import { LIMITS } from '../config';
+import { useAuth } from '../context/authState';
+import { getErrorMessage, roomApi } from '../lib/api';
+import { inputClass, primaryButtonClass } from '../lib/formStyles';
+import { formatTimeOfDay } from '../lib/format';
+import { readRecentRooms, rememberRoom, type RecentRoom } from '../lib/recentRooms';
 
-const Home: React.FC = () => {
-    const { user, logout } = useAuth();
-    const [roomId, setRoomId] = useState('');
-    const [username, setUsername] = useState(user?.username || '');
-    const [roomNameInput, setRoomNameInput] = useState('');
-    const navigate = useNavigate();
+/** Accepts a bare room code or a pasted invite link and returns the code. */
+function codeFromInput(value: string): string {
+  const segments = value.trim().split('/').filter(Boolean);
+  return (segments[segments.length - 1] ?? '').toLowerCase();
+}
 
-    useEffect(() => {
-        if (user?.username) setUsername(user.username);
-    }, [user]);
+export default function Home() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [roomName, setRoomName] = useState('');
+  const [joinValue, setJoinValue] = useState('');
+  const [busy, setBusy] = useState<'create' | 'join' | null>(null);
+  const [recentRooms] = useState<RecentRoom[]>(() => readRecentRooms());
 
-    const handleJoin = () => {
-        if (!roomId || !username) return;
-        navigate(`/room/${roomId}`, { state: { username, create: false } });
-    };
+  const createRoom = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy('create');
+    try {
+      const room = await roomApi.create(roomName.trim());
+      rememberRoom({ roomId: room.roomId, name: room.name });
+      navigate(`/room/${room.roomId}`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'The room could not be created. Please try again.'));
+      setBusy(null);
+    }
+  };
 
-    const handleCreate = () => {
-        if (!username) return;
-        // Generate a 6-character room ID (random alphanumeric)
-        const newRoomId = Math.random().toString(36).substring(2, 8);
-        navigate(`/room/${newRoomId}`, { state: { username, roomName: roomNameInput, create: true } });
-    };
+  const joinRoom = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const code = codeFromInput(joinValue);
+    if (!code) return;
 
-    const handleLogout = () => {
-        logout();
-        navigate('/login');
-    };
+    setBusy('join');
+    try {
+      const room = await roomApi.get(code);
+      rememberRoom({ roomId: room.roomId, name: room.name });
+      navigate(`/room/${room.roomId}`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'That room could not be found.'));
+      setBusy(null);
+    }
+  };
 
-    return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-brand-black text-brand-text p-4 relative overflow-hidden font-sans">
-            {/* Background Effects */}
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-                <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-brand-cyan/5 rounded-full blur-[120px]"></div>
-                <div className="absolute bottom-1/4 right-1/4 w-[600px] h-[600px] bg-brand-purple/5 rounded-full blur-[120px]"></div>
-                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03]"></div>
-            </div>
+  const signOut = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
 
-            {/* Logout Button */}
-            <button
-                onClick={handleLogout}
-                className="absolute top-6 right-6 z-50 flex items-center gap-2 bg-brand-surface/80 hover:bg-white/10 text-brand-text/80 hover:text-white px-4 py-2 rounded-full transition-all border border-white/5 hover:border-white/10 shadow-glass backdrop-blur-md"
-            >
-                <FaSignOutAlt className="text-sm" />
-                <span className="text-xs font-semibold tracking-wide">LOGOUT</span>
-            </button>
-
-            <div className="z-10 w-full max-w-md">
-                <div className="text-center mb-10 lg:mb-12">
-                    <div className="inline-flex items-center justify-center w-20 h-20 mb-6 relative group">
-                        <div className="absolute inset-0 bg-gradient-to-tr from-brand-cyan to-brand-purple rounded-3xl rotate-6 opacity-50 group-hover:rotate-12 transition-transform duration-500 blur-xl"></div>
-                        <div className="relative bg-brand-surface/90 p-5 rounded-2xl border border-white/10 shadow-2xl">
-                            <FaYoutube className="text-4xl text-white" />
-                        </div>
-                    </div>
-
-                    <h1 className="text-5xl lg:text-6xl font-extrabold tracking-tight mb-3 text-white">
-                        Stream<span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-cyan to-brand-purple">Sync</span>
-                    </h1>
-                    <p className="text-brand-dim font-medium tracking-wide text-sm">Next-Gen Synchronized Viewing</p>
-                </div>
-
-                <div className="bg-brand-surface/60 backdrop-blur-2xl p-8 rounded-3xl shadow-glass border border-white/5 relative overflow-hidden">
-
-                    <div className="space-y-6">
-                        <div>
-                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-dim mb-2 ml-1">Display Name</label>
-                            <input
-                                type="text"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                className="w-full p-4 bg-brand-black/50 border border-white/5 rounded-2xl focus:outline-none focus:border-brand-cyan/50 focus:ring-1 focus:ring-brand-cyan/50 transition-all text-brand-text placeholder-brand-dim/50 font-medium text-sm"
-                                placeholder="Enter your name"
-                            />
-                        </div>
-
-                        <div className="relative flex py-2 items-center">
-                            <div className="flex-grow border-t border-white/5"></div>
-                            <span className="flex-shrink-0 mx-4 text-[10px] text-brand-dim uppercase tracking-widest font-bold opacity-60">Join Room</span>
-                            <div className="flex-grow border-t border-white/5"></div>
-                        </div>
-
-                        <div className="flex gap-3">
-                            <input
-                                type="text"
-                                value={roomId}
-                                onChange={(e) => setRoomId(e.target.value)}
-                                className="flex-1 p-4 bg-brand-black/50 border border-white/5 rounded-2xl focus:outline-none focus:border-brand-cyan/50 focus:ring-1 focus:ring-brand-cyan/50 transition-all text-brand-text placeholder-brand-dim/50 font-medium text-sm"
-                                placeholder="Enter Room Code"
-                            />
-                            <button
-                                onClick={handleJoin}
-                                disabled={!roomId || !username}
-                                className="bg-brand-cyan/10 hover:bg-brand-cyan/20 disabled:opacity-30 disabled:cursor-not-allowed text-brand-cyan border border-brand-cyan/30 px-6 rounded-2xl font-bold transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
-                            >
-                                <FaPlay />
-                            </button>
-                        </div>
-
-                        <div className="flex gap-3 mb-6">
-                            <input
-                                type="text"
-                                value={roomNameInput}
-                                onChange={(e) => setRoomNameInput(e.target.value)}
-                                className="flex-1 p-4 bg-brand-black/50 border border-white/5 rounded-2xl focus:outline-none focus:border-brand-purple/50 focus:ring-1 focus:ring-brand-purple/50 transition-all text-brand-text placeholder-brand-dim/50 font-medium text-sm"
-                                placeholder="New Room Name (Optional)"
-                            />
-                        </div>
-
-                        <button
-                            onClick={handleCreate}
-                            disabled={!username || !roomNameInput.trim()}
-                            className="w-full group bg-gradient-to-r from-brand-cyan to-brand-purple hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-white p-4 rounded-2xl font-bold shadow-lg shadow-brand-purple/20 transform hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 text-sm tracking-wide"
-                        >
-                            <FaMagic className="group-hover:rotate-12 transition-transform" />
-                            Create New Space
-                        </button>
-                    </div>
-                </div>
-
-                <div className="text-center mt-8 opacity-40 hover:opacity-100 transition-opacity">
-                    <p className="text-[10px] text-brand-text uppercase tracking-widest font-semibold flex items-center justify-center gap-2">
-                        StreamSync <span className="w-1 h-1 bg-brand-text rounded-full"></span> 2024
-                    </p>
-                </div>
-            </div>
+  return (
+    <div className="min-h-dvh bg-brand-black font-sans text-brand-text">
+      <header className="flex items-center justify-between px-5 py-5 sm:px-8">
+        <div className="flex items-center gap-3">
+          <FaYoutube size={22} className="text-white" aria-hidden="true" />
+          <span className="text-lg font-extrabold tracking-tight">
+            Stream
+            <span className="bg-gradient-to-r from-brand-cyan to-brand-purple bg-clip-text text-transparent">Sync</span>
+          </span>
         </div>
-    );
-};
+        <div className="flex items-center gap-3">
+          <span className="hidden text-sm text-white/60 sm:inline">
+            Signed in as <strong className="font-semibold text-white">{user?.username}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={signOut}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 hover:text-white"
+          >
+            <FaSignOutAlt size={11} aria-hidden="true" />
+            Sign out
+          </button>
+        </div>
+      </header>
 
-export default Home;
+      <main className="mx-auto grid w-full max-w-4xl gap-6 px-5 pb-16 pt-4 sm:px-8 md:grid-cols-2">
+        <h1 className="sr-only">StreamSync home</h1>
+
+        <section aria-labelledby="create-heading" className="rounded-3xl border border-white/5 bg-brand-surface/60 p-6 shadow-glass backdrop-blur-xl">
+          <h2 id="create-heading" className="text-xl font-bold">
+            Start a watch party
+          </h2>
+          <p className="mt-1 text-sm text-white/55">Create a room, then share the invite link with friends.</p>
+
+          <form onSubmit={createRoom} className="mt-6 space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="room-name" className="block text-xs font-semibold uppercase tracking-wider text-brand-dim">
+                Room name (optional)
+              </label>
+              <input
+                id="room-name"
+                type="text"
+                maxLength={LIMITS.maxRoomNameLength}
+                autoComplete="off"
+                value={roomName}
+                onChange={(event) => setRoomName(event.target.value)}
+                placeholder="Friday movie night"
+                className={inputClass}
+              />
+            </div>
+            <button type="submit" disabled={busy !== null} className={primaryButtonClass}>
+              <FaMagic size={13} aria-hidden="true" />
+              {busy === 'create' ? 'Creating room…' : 'Create room'}
+            </button>
+          </form>
+        </section>
+
+        <section aria-labelledby="join-heading" className="rounded-3xl border border-white/5 bg-brand-surface/60 p-6 shadow-glass backdrop-blur-xl">
+          <h2 id="join-heading" className="text-xl font-bold">
+            Join a room
+          </h2>
+          <p className="mt-1 text-sm text-white/55">Enter a room code, or paste an invite link.</p>
+
+          <form onSubmit={joinRoom} className="mt-6 space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="room-code" className="block text-xs font-semibold uppercase tracking-wider text-brand-dim">
+                Room code or link
+              </label>
+              <input
+                id="room-code"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={joinValue}
+                onChange={(event) => setJoinValue(event.target.value)}
+                placeholder="e.g. k7m2x9qa"
+                className={inputClass}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={busy !== null || codeFromInput(joinValue) === ''}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-brand-cyan/30 bg-brand-cyan/10 px-4 py-3 text-sm font-bold text-brand-cyan transition hover:bg-brand-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy === 'join' ? 'Finding room…' : 'Join room'}
+              <FaArrowRight size={11} aria-hidden="true" />
+            </button>
+          </form>
+
+          {recentRooms.length > 0 && (
+            <div className="mt-8">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-brand-dim">Recent rooms</h3>
+              <ul className="space-y-2">
+                {recentRooms.map((recent) => (
+                  <li key={recent.roomId}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/room/${recent.roomId}`)}
+                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/5 bg-black/30 px-4 py-3 text-left transition hover:border-white/15 hover:bg-white/5"
+                    >
+                      <span className="min-w-0 truncate text-sm font-semibold text-white">{recent.name}</span>
+                      <span className="shrink-0 font-mono text-xs text-white/40">
+                        {recent.roomId} · {formatTimeOfDay(recent.visitedAt)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}

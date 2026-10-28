@@ -1,481 +1,418 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import type { FC, FormEvent, ChangeEvent, MouseEvent } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import SimplePeer from 'simple-peer';
-import { useSocket } from '../context/SocketContext';
-import { FaMicrophone, FaMicrophoneSlash } from 'react-icons/fa';
-
-// Components
-import RoomHeader from '../components/Room/RoomHeader';
-import RoomModals from '../components/Room/RoomModals';
-import VideoStage from '../components/Room/VideoStage';
+import { useNavigate, useParams } from 'react-router-dom';
+import ConfirmDialog from '../components/ConfirmDialog';
+import AudioDeck, { type PeerMix } from '../components/Room/AudioDeck';
 import ChatPanel from '../components/Room/ChatPanel';
 import ParticipantList from '../components/Room/ParticipantList';
-import AudioPeer from '../components/Room/AudioPeer';
+import RemoteAudio from '../components/Room/RemoteAudio';
+import RoomHeader from '../components/Room/RoomHeader';
+import SourceBar from '../components/Room/SourceBar';
+import VideoStage from '../components/Room/VideoStage';
+import VoiceBar from '../components/Room/VoiceBar';
+import { useAuth } from '../context/authState';
+import { useSocket } from '../context/socketState';
+import { useAudioDevices } from '../hooks/useAudioDevices';
+import { useDeckSettings } from '../hooks/useDeckSettings';
+import { useRoomSession } from '../hooks/useRoomSession';
+import { useSocketConnected } from '../hooks/useSocketConnected';
+import { useVoiceChat } from '../hooks/useVoiceChat';
+import { useWatchTogether } from '../hooks/useWatchTogether';
+import { getErrorMessage, roomApi } from '../lib/api';
+import { rememberRoom } from '../lib/recentRooms';
+import { SocketRequestError } from '../lib/socket';
+import type { DeckSettings } from '../lib/deckSettings';
+import type { Participant } from '../types';
 
-// Polyfill for SimplePeer
-if (typeof window !== 'undefined' && !(window as any).process) {
-    (window as any).process = { env: { DEBUG: undefined }, nextTick: (cb: any) => setTimeout(cb, 0) };
+type Tab = 'chat' | 'people' | 'audio';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'people', label: 'People' },
+  { id: 'audio', label: 'Audio deck' },
+];
+
+const SEEK_STEP_SECONDS = 5;
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
-// --- TYPES ---
-interface PeerData {
-    peerId: string;
-    peer: SimplePeer.Instance;
-    username: string;
-    isMuted: boolean;
-    stream?: MediaStream;
+function isButtonLike(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && ['BUTTON', 'A'].includes(target.tagName);
 }
 
-interface ChatMessage {
-    user: string;
-    text: string;
-    time: string;
-    isSystem?: boolean;
+export default function RoomRoute() {
+  const { roomId = '' } = useParams();
+  return <RoomView key={roomId} roomId={roomId} />;
 }
 
-const Room: FC = () => {
-    const { roomId } = useParams();
-    const location = useLocation();
-    const navigate = useNavigate();
-    const { username, create } = location.state || {}; // Username and create flag
+function RoomView({ roomId }: { roomId: string }) {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const socket = useSocket();
+  const connected = useSocketConnected(socket);
+  const deck = useDeckSettings();
+  const devices = useAudioDevices();
 
-    const [sidebarTab, setSidebarTab] = useState<'chat' | 'participants'>('chat');
-    const [isFullscreen, setIsFullscreen] = useState(false);
-    const videoContainerRef = useRef<HTMLDivElement>(null);
+  const [tab, setTab] = useState<Tab>('chat');
+  const [muted, setMuted] = useState(false);
+  const [pushToTalkHeld, setPushToTalkHeld] = useState(false);
+  const [deafened, setDeafened] = useState(false);
+  const [peerMix, setPeerMix] = useState<Record<string, PeerMix>>({});
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [endOpen, setEndOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<Participant | null>(null);
+  const [busy, setBusy] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLElement>(null);
 
-    // Video State
-    const [inputUrl, setInputUrl] = useState('');
-    const [currentUrl, setCurrentUrl] = useState('');
-    const [videoId, setVideoId] = useState('');
-    const [playing, setPlaying] = useState(false);
-    const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(0);
-    const [seekTrigger, setSeekTrigger] = useState<number | null>(null);
-    const [isDragging, setIsDragging] = useState(false);
+  const handleRoomEnded = useCallback(() => {
+    toast('The room has been closed.');
+    navigate('/', { replace: true });
+  }, [navigate]);
 
-    // Socket / Peers
-    const socket = useSocket();
-    const isRemoteUpdate = useRef(false);
-    const playerInstanceRef = useRef<any>(null);
-    const [peers, setPeers] = useState<PeerData[]>([]);
-    const peersRef = useRef<PeerData[]>([]);
-    const [stream, setStream] = useState<MediaStream | null>(null);
-    const [muted, setMuted] = useState(false);
+  const handleKicked = useCallback(() => {
+    toast.error('You were removed from this room.');
+    navigate('/', { replace: true });
+  }, [navigate]);
 
-    // Room Management
-    const [roomName, setRoomName] = useState<string>(location.state?.roomName || '');
-    const [roomOwner, setRoomOwner] = useState<string>('');
-    const [showLeaveModal, setShowLeaveModal] = useState(false);
-    const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const handleJoinFailed = useCallback(
+    (error: SocketRequestError) => {
+      toast.error(error.message);
+      if (error.code !== 'TIMEOUT') navigate('/', { replace: true });
+    },
+    [navigate]
+  );
 
-    // Chat
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
-    const [msgInput, setMsgInput] = useState('');
-    const chatEndRef = useRef<HTMLDivElement>(null);
+  const handleActionError = useCallback((message: string) => toast.error(message), []);
 
-    // --- INIT ---
-    useEffect(() => {
-        if (!username) { navigate('/'); return; }
-        if (!socket || !roomId) return;
+  const session = useRoomSession({
+    socket,
+    roomId,
+    onRoomEnded: handleRoomEnded,
+    onKicked: handleKicked,
+    onJoinFailed: handleJoinFailed,
+    onActionError: handleActionError,
+  });
+  const { joined, selfId, participants, playback, items, room, setMuted: sendPresenceMuted } = session;
 
-        const init = async () => {
-            try {
-                // 1. Get Stream
-                const s = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
-                setStream(s);
+  const voice = useVoiceChat({
+    socket,
+    selfId,
+    participants,
+    deck: deck.settings,
+    muted,
+    pushToTalkHeld,
+  });
 
-                // 2. Join or Create Room
-                if (create) {
-                    socket.emit('create-room', roomId, username, roomName);
-                    // Clear create flag from history so back button/refresh treats this as a join
-                    navigate('.', { replace: true, state: { ...location.state, create: false } });
-                } else {
-                    socket.emit('join-room', roomId, username);
-                }
+  useEffect(() => {
+    if (joined) sendPresenceMuted(!voice.transmitting);
+  }, [joined, voice.transmitting, sendPresenceMuted]);
 
-                // 3. Setup Listeners
+  const micStatus = voice.mic.status;
+  const refreshDevices = devices.refresh;
+  useEffect(() => {
+    if (micStatus === 'live') void refreshDevices();
+  }, [micStatus, refreshDevices]);
 
-                // New: Handle Room Not Found Error
-                socket.on('error-room-not-found', () => {
-                    toast.error("Room not found! Please check the ID or create a new room.");
-                    navigate('/');
-                });
-                socket.on('room-sync', (data) => {
-                    if (data.owner) setRoomOwner(data.owner);
-                    if (data.name) setRoomName(data.name);
-                    setMessages(data.messages || []);
-                    if (data.videoState) {
-                        if (data.videoState.url) { setCurrentUrl(data.videoState.url); setInputUrl(data.videoState.url); }
-                        if (data.videoState.playing !== undefined) setPlaying(data.videoState.playing);
-                        if (data.videoState.currentTime) {
-                            setSeekTrigger(data.videoState.currentTime);
-                            setCurrentTime(data.videoState.currentTime);
-                        }
-                    }
+  const watch = useWatchTogether({
+    containerRef,
+    playback,
+    serverNow: session.serverNow,
+    onControl: session.control,
+    volume: deck.settings.videoVolume,
+    duckEnabled: deck.settings.duckVideoWhenSpeaking,
+    duckActive: voice.remoteSpeaking,
+    preferredQuality: deck.settings.preferredQuality,
+  });
+  const { togglePlay, seekBy, resumeBlocked } = watch;
 
-                    // --- Improved Peer Logic: Initiate to ALL present users ---
-                    const users = data.users || [];
-                    const peersToRender: PeerData[] = [];
+  const roomName = room?.name;
+  useEffect(() => {
+    if (roomName) rememberRoom({ roomId, name: roomName });
+  }, [roomId, roomName]);
 
-                    users.forEach((user: any) => {
-                        if (user.socketId === socket.id) return; // Skip self
+  useEffect(() => {
+    const handleChange = () => setIsFullscreen(document.fullscreenElement !== null && document.fullscreenElement === stageRef.current);
+    document.addEventListener('fullscreenchange', handleChange);
+    return () => document.removeEventListener('fullscreenchange', handleChange);
+  }, []);
 
-                        // Check if we already have a peer for this user (should be empty on initial join)
-                        const existing = peersRef.current.find(p => p.peerId === user.socketId);
-                        if (existing) {
-                            peersToRender.push(existing);
-                        } else {
-                            // We are the JOINER, so we INITIATE connection to EXISTING users.
-                            const p = new SimplePeer({ initiator: true, stream: s });
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    } else {
+      void stageRef.current?.requestFullscreen().catch(() => undefined);
+    }
+  }, []);
 
-                            p.on('signal', sig => {
-                                socket.emit('signal', { userToCall: user.socketId, signal: sig, from: socket.id });
-                            });
+  const dialogOpen = leaveOpen || endOpen || removeTarget !== null;
+  const voiceMode = deck.settings.voiceMode;
 
-                            p.on('stream', remoteStream => {
-                                const target = peersRef.current.find(pd => pd.peer === p);
-                                if (target) {
-                                    target.stream = remoteStream;
-                                    setPeers([...peersRef.current]);
-                                }
-                            });
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (dialogOpen || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isEditableTarget(event.target)) return;
 
-                            p.on('error', _err => { /* handle peer error silently or log to analytics */ });
-
-                            const peerData = {
-                                peerId: user.socketId,
-                                peer: p,
-                                username: user.username,
-                                isMuted: user.isMuted
-                            };
-                            peersRef.current.push(peerData);
-                            peersToRender.push(peerData);
-                        }
-                    });
-                    setPeers([...peersRef.current]);
-                });
-
-                socket.on('room-ended', () => {
-                    toast.error("The room has been deleted by the owner.");
-                    navigate('/');
-                });
-
-
-                socket.on('all-users', (users) => {
-                    // Update the list of peers based on server state
-                    // This is mainly for:
-                    // 1. Removing disconnected users
-                    // 2. Updating metadata (mute status, username)
-                    // 3. (Optional) Adding new users for UI purposes before connection established
-
-                    const currentPeers = peersRef.current;
-                    const newPeers: PeerData[] = [];
-
-                    // Identify and remove disconnected peers
-                    currentPeers.forEach(p => {
-                        const stillHere = users.find((u: any) => u.socketId === p.peerId);
-                        if (!stillHere) {
-                            p.peer.destroy();
-                        } else {
-                            // Update metadata
-                            p.username = stillHere.username;
-                            p.isMuted = stillHere.isMuted;
-                            newPeers.push(p);
-                        }
-                    });
-
-                    // Check for new users that might not have connected yet (should be handled by signal, but good for UI)
-                    /* 
-                       Note: If we add placeholder peers here, we must be careful not to double-create.
-                       Wait for 'signal' to create the actual SimplePeer instance for incoming connections.
-                    */
-
-                    peersRef.current = newPeers;
-                    setPeers([...newPeers]);
-                });
-
-                socket.on('user-connected', (user) => {
-                    // Just a notification
-                    setMessages(prev => [...prev, { user: 'System', text: `${user.username || 'Someone'} joined`, time: '', isSystem: true }]);
-                });
-
-                socket.on('user-disconnected', (id) => {
-                    const p = peersRef.current.find(x => x.peerId === id);
-                    if (p) {
-                        p.peer.destroy();
-                        setMessages(prev => [...prev, { user: 'System', text: `${p.username || 'Someone'} left`, time: '', isSystem: true }]);
-                    }
-                    const remaining = peersRef.current.filter(x => x.peerId !== id);
-                    peersRef.current = remaining;
-                    setPeers(remaining);
-                });
-
-                socket.on('signal', (data) => {
-                    const found = peersRef.current.find(p => p.peerId === data.from);
-                    if (found) {
-                        found.peer.signal(data.signal);
-                    } else {
-                        // Receiving a signal from someone we don't know:
-                        // This means THEY initiated. So we respond (initiator: false).
-                        const p = new SimplePeer({ initiator: false, stream: s });
-
-                        p.on('signal', sig => {
-                            socket.emit('signal', { userToCall: data.from, signal: sig, from: socket.id });
-                        });
-
-                        p.on('stream', remoteStream => {
-                            const target = peersRef.current.find(pd => pd.peer === p);
-                            if (target) {
-                                target.stream = remoteStream;
-                                setPeers([...peersRef.current]);
-                            }
-                        });
-
-                        p.on('error', err => console.error('Peer Response Error:', err));
-
-                        p.signal(data.signal);
-
-                        // We might not know their username yet if 'all-users' hasn't arrived/processed.
-                        // Ideally pass username in 'signal' or wait for 'all-users'.
-                        // For now, placeholder.
-                        const newPeer = { peerId: data.from, peer: p, username: 'Connecting...', isMuted: true };
-                        peersRef.current.push(newPeer);
-                        setPeers([...peersRef.current]);
-                    }
-                });
-
-                socket.on('receive-message', (data: ChatMessage) => {
-                    setMessages(prev => [...prev, data]);
-                    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-                });
-
-                socket.on('change-video', (url) => { setCurrentUrl(url); setInputUrl(url); setPlaying(true); setSeekTrigger(0); });
-                socket.on('video-state', (state: any) => {
-                    if (isRemoteUpdate.current) return;
-                    isRemoteUpdate.current = true;
-                    setPlaying(state.playing);
-                    if (state.time !== undefined && state.type === 'seek') { setSeekTrigger(state.time); setCurrentTime(state.time); }
-                    setTimeout(() => isRemoteUpdate.current = false, 800);
-                });
-
-            } catch (e) {
-                console.error("Setup Error:", e);
-                alert("Could not access microphone! Voice chat will not work.");
-            }
-        };
-
-        // Delay init slightly to ensure socket is ready? No, useSocket handles it.
-        // But running init immediately is fine.
-        init();
-
-        return () => {
-            socket.off('all-users'); socket.off('signal'); socket.off('user-connected'); socket.off('receive-message');
-            socket.off('change-video'); socket.off('video-state'); socket.off('room-sync'); socket.off('room-ended');
-            if (stream) stream.getTracks().forEach(t => t.stop());
-            peersRef.current.forEach(p => p.peer.destroy());
-            peersRef.current = [];
-        };
-    }, [socket, roomId, username, navigate]);
-
-
-    // ID Parser
-    useEffect(() => {
-        try {
-            const u = new URL(currentUrl);
-            setVideoId(u.searchParams.get('v') || '');
-        } catch (e) { if (currentUrl.length === 11) setVideoId(currentUrl); }
-    }, [currentUrl]);
-
-    // Handlers
-    const handleToggleMute = () => {
-        if (stream) {
-            const nextMute = !muted;
-            stream.getAudioTracks().forEach(t => t.enabled = !nextMute);
-            setMuted(nextMute);
-            socket?.emit('toggle-mute', roomId, nextMute);
-        }
+      const key = event.key.toLowerCase();
+      if (key === 'v') {
+        if (voiceMode === 'push-to-talk' && !event.repeat) setPushToTalkHeld(true);
+        return;
+      }
+      if (key === 'm') {
+        event.preventDefault();
+        setMuted((value) => !value);
+        return;
+      }
+      if (key === 'f') {
+        event.preventDefault();
+        toggleFullscreen();
+        return;
+      }
+      if (key === 'arrowleft' || key === 'arrowright') {
+        event.preventDefault();
+        seekBy(key === 'arrowleft' ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS);
+        return;
+      }
+      if ((key === ' ' || key === 'k') && !isButtonLike(event.target)) {
+        event.preventDefault();
+        togglePlay();
+      }
     };
-
-    const handleFullscreen = () => {
-        if (!document.fullscreenElement) {
-            videoContainerRef.current?.requestFullscreen(); setIsFullscreen(true);
-        } else {
-            document.exitFullscreen(); setIsFullscreen(false);
-        }
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === 'v') setPushToTalkHeld(false);
     };
+    const release = () => setPushToTalkHeld(false);
 
-    const handleSendMessage = (e?: FormEvent) => {
-        e?.preventDefault();
-        if (!msgInput.trim() || !socket) return;
-        socket.emit('send-message', { roomId, text: msgInput, username, timestamp: new Date().toISOString() });
-        setMsgInput('');
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', release);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', release);
     };
+  }, [dialogOpen, voiceMode, seekBy, togglePlay, toggleFullscreen]);
 
-    const submitUrl = () => {
-        if (socket && inputUrl) {
-            socket.emit('change-video', roomId, inputUrl);
-            setCurrentUrl(inputUrl); setPlaying(true); setSeekTrigger(0);
-        }
-    };
+  const updatePeerMix = useCallback((socketId: string, patch: Partial<PeerMix>) => {
+    setPeerMix((previous) => {
+      const current: PeerMix = previous[socketId] ?? { volume: 1, muted: false };
+      return { ...previous, [socketId]: { ...current, ...patch } };
+    });
+  }, []);
 
-    const handleTogglePlay = () => {
-        const next = !playing;
-        setPlaying(next);
-        const t = playerInstanceRef.current ? playerInstanceRef.current.getCurrentTime() : currentTime;
-        if (!isRemoteUpdate.current && socket) socket.emit('video-state', roomId, { playing: next, type: 'playpause', time: t });
-    };
+  const remotes = useMemo(
+    () =>
+      participants
+        .filter((participant) => participant.socketId !== selfId)
+        .map((participant) => ({
+          socketId: participant.socketId,
+          username: participant.username,
+          level: voice.levels[participant.socketId],
+        })),
+    [participants, selfId, voice.levels]
+  );
 
-    const handlePlayerStateChange = (s: number) => {
-        if (isRemoteUpdate.current) return;
-        if (s === 1 && !playing) {
-            setPlaying(true);
-            const t = playerInstanceRef.current ? playerInstanceRef.current.getCurrentTime() : currentTime;
-            socket?.emit('video-state', roomId, { playing: true, type: 'playpause', time: t });
-        } else if (s === 2 && playing) {
-            setPlaying(false);
-            const t = playerInstanceRef.current ? playerInstanceRef.current.getCurrentTime() : currentTime;
-            socket?.emit('video-state', roomId, { playing: false, type: 'playpause', time: t });
-        }
-    };
+  const copyText = async (text: string, message: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(message);
+    } catch {
+      toast.error('Copy failed. Select the text and copy it manually.');
+    }
+  };
 
-    // Seek
-    const handleSeek = (e: ChangeEvent<HTMLInputElement>) => { setIsDragging(true); setCurrentTime(parseFloat(e.target.value) * duration); };
-    const handleSeekEnd = (e: MouseEvent<HTMLInputElement>) => {
-        setIsDragging(false);
-        const t = parseFloat((e.target as HTMLInputElement).value) * duration;
-        setSeekTrigger(t);
-        if (!isRemoteUpdate.current && socket) socket.emit('video-state', roomId, { playing: true, type: 'seek', time: t });
-    };
+  const leaveRoom = async () => {
+    setBusy(true);
+    await session.leave();
+    navigate('/', { replace: true });
+  };
 
-    // Actions
-    const handleLeaveRoom = () => {
-        if (socket) socket.emit('leave-room', roomId);
-        navigate('/');
-    };
+  const endRoom = async () => {
+    setBusy(true);
+    try {
+      await roomApi.end(roomId);
+      toast('Room ended.');
+      navigate('/', { replace: true });
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'The room could not be ended.'));
+      setBusy(false);
+      setEndOpen(false);
+    }
+  };
 
-    const handleDeleteRoom = () => {
-        if (socket) socket.emit('delete-room', roomId);
-    };
+  const removeParticipant = async () => {
+    if (!removeTarget) return;
+    setBusy(true);
+    try {
+      await session.kick(removeTarget.socketId);
+      toast(`${removeTarget.username} was removed from the room.`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'That participant could not be removed.'));
+    } finally {
+      setBusy(false);
+      setRemoveTarget(null);
+    }
+  };
 
-    return (
-        <div className="flex flex-col lg:flex-row h-screen bg-[#0f0f0f] text-white font-sans overflow-hidden">
-            {/* LEFT: Main Content */}
-            <div className="w-full lg:flex-1 h-[40vh] lg:h-auto flex flex-col relative transition-all duration-300 flex-shrink-0">
+  const hasSource = playback?.source != null;
+  const isAudio = playback?.source?.kind === 'media' && playback.source.mediaType === 'audio';
+  const isOwner = room !== null && room.ownerId === user?.id;
+  const inviteUrl = `${window.location.origin}/room/${roomId}`;
 
-                <RoomHeader
-                    roomName={roomName}
-                    inputUrl={inputUrl}
-                    setInputUrl={setInputUrl}
-                    submitUrl={submitUrl}
-                    roomOwner={roomOwner}
-                    username={username}
-                    setShowDeleteModal={setShowDeleteModal}
-                    setShowLeaveModal={setShowLeaveModal}
-                />
+  return (
+    <div className="flex min-h-dvh flex-col bg-brand-black font-sans text-brand-text lg:h-dvh lg:flex-row lg:overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+        <RoomHeader
+          roomName={room?.name ?? 'Joining room…'}
+          roomCode={roomId}
+          participantCount={participants.length}
+          isOwner={isOwner}
+          connected={connected}
+          onCopyCode={() => void copyText(roomId, 'Room code copied.')}
+          onShare={() => void copyText(inviteUrl, 'Invite link copied.')}
+          onLeave={() => setLeaveOpen(true)}
+          onEnd={() => setEndOpen(true)}
+        />
 
-                <VideoStage
-                    videoId={videoId}
-                    playing={playing}
-                    seekTrigger={seekTrigger}
-                    isDragging={isDragging}
-                    setCurrentTime={setCurrentTime}
-                    setDuration={setDuration}
-                    handlePlayerStateChange={handlePlayerStateChange}
-                    playerInstanceRef={playerInstanceRef}
-                    handleTogglePlay={handleTogglePlay}
-                    currentTime={currentTime}
-                    duration={duration}
-                    handleSeek={handleSeek}
-                    handleSeekEnd={handleSeekEnd}
-                    handleFullscreen={handleFullscreen}
-                    isFullscreen={isFullscreen}
-                    inputUrl={inputUrl}
-                    setInputUrl={setInputUrl}
-                    submitUrl={submitUrl}
-                    videoContainerRef={videoContainerRef}
-                />
+        <SourceBar onLoad={session.loadSource} />
 
-                {/* Bottom Bar: Mic Controls - Compact on mobile */}
-                <div className="h-14 lg:h-20 bg-[#0a0a0a]/50 backdrop-blur-sm flex items-center justify-center border-t border-white/5">
-                    <button
-                        onClick={handleToggleMute}
-                        className={`flex items-center gap-2 lg:gap-3 px-4 lg:px-6 py-2 lg:py-3 rounded-full border transition-all ${muted ? 'bg-red-500/20 border-red-500/50 text-red-500' : 'bg-green-500/20 border-green-500/50 text-green-400 hover:bg-green-500/30'}`}
-                    >
-                        {muted ? <FaMicrophoneSlash size={14} /> : <FaMicrophone size={14} />}
-                        <span className="font-semibold text-xs lg:text-sm">{muted ? 'Unmuted' : 'Muted'}</span>
-                    </button>
-                </div>
-            </div>
+        <VideoStage
+          stageRef={stageRef}
+          containerRef={containerRef}
+          hasSource={hasSource}
+          isAudio={isAudio}
+          adapter={watch.adapter}
+          playing={playback?.playing ?? false}
+          loading={watch.loading}
+          buffering={watch.buffering}
+          blocked={watch.blocked}
+          error={watch.error}
+          volume={deck.settings.videoVolume}
+          quality={deck.settings.preferredQuality}
+          isFullscreen={isFullscreen}
+          onResume={resumeBlocked}
+          onTogglePlay={togglePlay}
+          onSeek={watch.seekTo}
+          onVolumeChange={(volume) => deck.update({ videoVolume: volume })}
+          onQualityChange={(quality) => deck.update({ preferredQuality: quality })}
+          onToggleFullscreen={toggleFullscreen}
+        />
 
-            {/* Sidebar */}
-            <div className="w-full lg:w-[380px] flex-1 lg:flex-none h-auto bg-[#121212] border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col shadow-2xl z-40">
-                <div className="flex text-sm font-semibold border-b border-white/5">
-                    <button
-                        className={`flex-1 py-5 transition-colors ${sidebarTab === 'chat' ? 'text-white border-b-2 border-purple-500 bg-white/5' : 'text-gray-500 hover:text-gray-300'}`}
-                        onClick={() => setSidebarTab('chat')}
-                    >
-                        Chat
-                    </button>
-                    <button
-                        className={`flex-1 py-5 transition-colors ${sidebarTab === 'participants' ? 'text-white border-b-2 border-purple-500 bg-white/5' : 'text-gray-500 hover:text-gray-300'}`}
-                        onClick={() => setSidebarTab('participants')}
-                    >
-                        People ({peers.length + 1})
-                    </button>
-                </div>
+        <VoiceBar
+          micStatus={voice.mic.status}
+          micError={voice.mic.error}
+          transmitting={voice.transmitting}
+          muted={muted}
+          voiceMode={voiceMode}
+          pushHeld={pushToTalkHeld}
+          deafened={deafened}
+          selfLevel={voice.selfLevel}
+          onToggleMute={() => setMuted((value) => !value)}
+          onToggleDeafen={() => setDeafened((value) => !value)}
+          onRetryMic={voice.mic.retry}
+        />
+      </div>
 
-                <div className="flex-1 overflow-hidden relative bg-[#0f0f0f]/50">
-                    {/* CHAT */}
-                    {sidebarTab === 'chat' && (
-                        <ChatPanel
-                            roomId={roomId || ''}
-                            messages={messages}
-                            username={username}
-                            msgInput={msgInput}
-                            setMsgInput={setMsgInput}
-                            handleSendMessage={handleSendMessage}
-                            chatEndRef={chatEndRef}
-                        />
-                    )}
-
-                    {/* PARTICIPANTS */}
-                    {sidebarTab === 'participants' && (
-                        <ParticipantList
-                            peers={peers}
-                            username={username}
-                            roomOwner={roomOwner}
-                            muted={muted}
-                        />
-                    )}
-                </div>
-            </div>
-
-            {/* Modals */}
-            <RoomModals
-                showLeaveModal={showLeaveModal}
-                setShowLeaveModal={setShowLeaveModal}
-                showDeleteModal={showDeleteModal}
-                setShowDeleteModal={setShowDeleteModal}
-                handleLeaveRoom={handleLeaveRoom}
-                handleDeleteRoom={handleDeleteRoom}
-            />
-
-            {/* Audio Peers (Hidden but always active) */}
-            <div className="hidden">
-                {peers.map((peer) => (
-                    <AudioPeer key={peer.peerId} stream={peer.stream || null} />
-                ))}
-            </div>
-
-            <style>{`
-                .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-                .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
-            `}</style>
+      <aside className="flex min-h-[55vh] flex-col border-t border-white/5 bg-brand-surface lg:min-h-0 lg:w-[380px] lg:border-l lg:border-t-0">
+        <div role="tablist" aria-label="Room panels" className="flex border-b border-white/5 text-sm font-semibold">
+          {TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              id={`tab-${id}`}
+              aria-selected={tab === id}
+              aria-controls={`panel-${id}`}
+              onClick={() => setTab(id)}
+              className={`flex-1 border-b-2 py-3.5 transition ${
+                tab === id ? 'border-brand-purple bg-white/5 text-white' : 'border-transparent text-white/50 hover:text-white/80'
+              }`}
+            >
+              {label}
+              {id === 'people' ? ` (${participants.length})` : ''}
+            </button>
+          ))}
         </div>
-    );
-};
 
-export default Room;
+        <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="min-h-0 flex-1">
+          {tab === 'chat' && <ChatPanel items={items} selfUserId={user?.id ?? ''} onSend={session.sendMessage} />}
+          {tab === 'people' && (
+            <ParticipantList
+              participants={participants}
+              ownerId={room?.ownerId ?? ''}
+              selfSocketId={selfId}
+              viewerIsOwner={isOwner}
+              levels={voice.levels}
+              onRemove={setRemoveTarget}
+            />
+          )}
+          {tab === 'audio' && (
+            <AudioDeck
+              settings={deck.settings as DeckSettings}
+              onUpdate={deck.update}
+              onReset={deck.reset}
+              inputs={devices.inputs}
+              outputs={devices.outputs}
+              supportsOutputSelection={devices.supportsOutputSelection}
+              micStatus={voice.mic.status}
+              selfLevel={voice.selfLevel}
+              onRetryMic={voice.mic.retry}
+              remotes={remotes}
+              peerMix={peerMix}
+              onPeerMixChange={updatePeerMix}
+              deafened={deafened}
+              onToggleDeafen={() => setDeafened((value) => !value)}
+              hasSharedMedia={hasSource}
+            />
+          )}
+        </div>
+      </aside>
+
+      <div hidden aria-hidden="true">
+        {remotes.map((remote) => (
+          <RemoteAudio
+            key={remote.socketId}
+            stream={voice.mesh.streams[remote.socketId] ?? null}
+            volume={peerMix[remote.socketId]?.volume ?? 1}
+            muted={deafened || (peerMix[remote.socketId]?.muted ?? false)}
+            sinkId={deck.settings.outputDeviceId}
+          />
+        ))}
+      </div>
+
+      <ConfirmDialog
+        open={leaveOpen}
+        title="Leave this room?"
+        description="You can come back at any time with the room code."
+        confirmLabel="Leave room"
+        busy={busy}
+        onConfirm={leaveRoom}
+        onCancel={() => setLeaveOpen(false)}
+      />
+      <ConfirmDialog
+        open={endOpen}
+        title="End this room?"
+        description="Everyone will be removed and the room code will stop working. This cannot be undone."
+        confirmLabel="End room"
+        tone="danger"
+        busy={busy}
+        onConfirm={endRoom}
+        onCancel={() => setEndOpen(false)}
+      />
+      <ConfirmDialog
+        open={removeTarget !== null}
+        title={`Remove ${removeTarget?.username ?? 'this participant'}?`}
+        description="They will be disconnected and can rejoin with the room code."
+        confirmLabel="Remove"
+        tone="danger"
+        busy={busy}
+        onConfirm={removeParticipant}
+        onCancel={() => setRemoveTarget(null)}
+      />
+    </div>
+  );
+}
