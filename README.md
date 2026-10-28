@@ -382,11 +382,11 @@ Browser-level end-to-end tests are not part of this repository yet.
 `docker-compose.yml` runs MongoDB 7, the API, and the client behind nginx:
 
 ```bash
-cp .env.example .env        # set JWT_SECRET
-docker compose up --build
+cp .env.example .env        # then set JWT_SECRET
+docker compose up --build -d
 ```
 
-The client is served on `http://localhost:8080` and the API on `http://localhost:5000`. The compose file sets `CLIENT_ORIGIN` to the client address and passes `VITE_BACKEND_URL` into the client build.
+The client is served on `http://localhost:8080` and the API on `http://localhost:5000`. The compose file sets `CLIENT_ORIGIN` to the client address and passes `VITE_BACKEND_URL` into the client build. Stop the stack with `docker compose down`; add `-v` to also delete the MongoDB data volume.
 
 ## Troubleshooting
 
