@@ -1,35 +1,37 @@
-'use strict';
-
-const express = require('express');
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
-const rateLimit = require('express-rate-limit');
-const User = require('../models/User');
-const { signSession } = require('../lib/auth');
-const { HttpError } = require('../lib/httpError');
-const { normalizeUsername, normalizeEmail, validatePassword } = require('../lib/validation');
-const { createRequireAuth } = require('../middleware/requireAuth');
+import bcrypt from 'bcryptjs';
+import express from 'express';
+import { rateLimit } from 'express-rate-limit';
+import mongoose from 'mongoose';
+import { ERROR_CODES, type AuthSession, type CurrentUserResponse } from '@streamsync/shared';
+import type { Config } from '../../config.js';
+import { HttpError } from '../../http/http-error.js';
+import { createRequireAuth, currentUser } from '../../http/require-auth.js';
+import { signSession } from '../../lib/session-token.js';
+import { normalizeEmail, normalizeUsername, validatePassword } from '../../lib/validation.js';
+import { User, type UserDocument } from './user.model.js';
 
 const RATE_WINDOW_MS = 15 * 60 * 1000;
+const DUPLICATE_KEY_ERROR = 11000;
 
 // Used to keep failed logins for unknown accounts as slow as real ones.
-let dummyHashPromise = null;
-const getDummyHash = () => {
+let dummyHashPromise: Promise<string> | null = null;
+const getDummyHash = (): Promise<string> => {
   dummyHashPromise = dummyHashPromise || bcrypt.hash('streamsync-timing-filler', 12);
   return dummyHashPromise;
 };
 
-const trimmedText = (value) => (typeof value === 'string' ? value.trim() : '');
+const trimmedText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
-function duplicateKeyError(err) {
-  if (err.code !== 11000) return err;
-  const field = Object.keys(err.keyPattern || {})[0];
+function duplicateKeyError(err: unknown): unknown {
+  const { code, keyPattern } = err as { code?: number; keyPattern?: Record<string, unknown> };
+  if (code !== DUPLICATE_KEY_ERROR) return err;
+  const field = Object.keys(keyPattern || {})[0];
   return field === 'email'
-    ? new HttpError(409, 'EMAIL_TAKEN', 'An account with that email already exists')
-    : new HttpError(409, 'USERNAME_TAKEN', 'That username is already taken');
+    ? new HttpError(409, ERROR_CODES.EMAIL_TAKEN, 'An account with that email already exists')
+    : new HttpError(409, ERROR_CODES.USERNAME_TAKEN, 'That username is already taken');
 }
 
-function createAuthRouter({ config }) {
+export function createAuthRouter({ config }: { config: Config }) {
   const router = express.Router();
   const requireAuth = createRequireAuth(config.jwtSecret);
 
@@ -38,30 +40,36 @@ function createAuthRouter({ config }) {
     limit: config.authRateLimit,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
-    handler: (req, res) => {
-      res.status(429).json({ code: 'RATE_LIMITED', message: 'Too many attempts. Please wait a few minutes and try again.' });
+    handler: (_req, res) => {
+      res
+        .status(429)
+        .json({ code: ERROR_CODES.RATE_LIMITED, message: 'Too many attempts. Please wait a few minutes and try again.' });
     },
   });
 
-  const sessionFor = (user) => ({
-    token: signSession(user, { secret: config.jwtSecret, expiresIn: config.jwtExpiresIn }),
+  const sessionFor = (user: UserDocument): AuthSession => ({
+    token: signSession({ id: user.id, username: user.username }, {
+      secret: config.jwtSecret,
+      expiresIn: config.jwtExpiresIn,
+    }),
     user: user.toPublicJSON(),
   });
 
   // @route   POST /api/auth/signup
   router.post('/signup', authLimiter, async (req, res) => {
-    const username = normalizeUsername(req.body && req.body.username);
-    const email = normalizeEmail(req.body && req.body.email);
-    const password = validatePassword(req.body && req.body.password);
+    const body: Record<string, unknown> = req.body ?? {};
+    const username = normalizeUsername(body.username);
+    const email = normalizeEmail(body.email);
+    const password = validatePassword(body.password);
 
     if (await User.exists({ username })) {
-      throw new HttpError(409, 'USERNAME_TAKEN', 'That username is already taken');
+      throw new HttpError(409, ERROR_CODES.USERNAME_TAKEN, 'That username is already taken');
     }
     if (email && (await User.exists({ email }))) {
-      throw new HttpError(409, 'EMAIL_TAKEN', 'An account with that email already exists');
+      throw new HttpError(409, ERROR_CODES.EMAIL_TAKEN, 'An account with that email already exists');
     }
 
-    let user;
+    let user: UserDocument;
     try {
       user = await User.create({ username, email, password });
     } catch (err) {
@@ -73,10 +81,11 @@ function createAuthRouter({ config }) {
 
   // @route   POST /api/auth/login  (identifier = username or email)
   router.post('/login', authLimiter, async (req, res) => {
-    const identifier = trimmedText(req.body && (req.body.identifier ?? req.body.email));
-    const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
+    const body: Record<string, unknown> = req.body ?? {};
+    const identifier = trimmedText(body.identifier ?? body.email);
+    const password = typeof body.password === 'string' ? body.password : '';
     if (!identifier || !password) {
-      throw new HttpError(400, 'VALIDATION_ERROR', 'Enter your username or email and your password');
+      throw new HttpError(400, ERROR_CODES.VALIDATION_ERROR, 'Enter your username or email and your password');
     }
 
     const user = await User.findOne({
@@ -88,7 +97,7 @@ function createAuthRouter({ config }) {
       : await bcrypt.compare(password, await getDummyHash());
 
     if (!user || !passwordMatches) {
-      throw new HttpError(401, 'INVALID_CREDENTIALS', 'Incorrect username/email or password');
+      throw new HttpError(401, ERROR_CODES.INVALID_CREDENTIALS, 'Incorrect username/email or password');
     }
 
     res.json(sessionFor(user));
@@ -96,15 +105,15 @@ function createAuthRouter({ config }) {
 
   // @route   GET /api/auth/me
   router.get('/me', requireAuth, async (req, res) => {
-    const user = mongoose.isValidObjectId(req.user.id) ? await User.findById(req.user.id) : null;
+    const userId = currentUser(req).id;
+    const user = mongoose.isValidObjectId(userId) ? await User.findById(userId) : null;
     if (!user) {
-      throw new HttpError(401, 'UNAUTHORIZED', 'Your account no longer exists. Please sign in again.');
+      throw new HttpError(401, ERROR_CODES.UNAUTHORIZED, 'Your account no longer exists. Please sign in again.');
     }
 
-    res.json({ user: user.toPublicJSON() });
+    const body: CurrentUserResponse = { user: user.toPublicJSON() };
+    res.json(body);
   });
 
   return router;
 }
-
-module.exports = { createAuthRouter };

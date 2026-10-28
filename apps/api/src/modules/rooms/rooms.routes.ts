@@ -1,51 +1,50 @@
-'use strict';
+import express from 'express';
+import { ERROR_CODES } from '@streamsync/shared';
+import type { Config } from '../../config.js';
+import { HttpError } from '../../http/http-error.js';
+import { createRequireAuth, currentUser } from '../../http/require-auth.js';
+import { normalizeRoomId } from '../../lib/ids.js';
+import { normalizeRoomName } from '../../lib/validation.js';
+import type { RoomServer } from '../../realtime/types.js';
+import { createRoom, deleteRoom, findRoom, toRoomDTO } from './room.service.js';
 
-const express = require('express');
-const roomService = require('../services/roomService');
-const { normalizeRoomId } = require('../lib/ids');
-const { HttpError } = require('../lib/httpError');
-const { normalizeRoomName } = require('../lib/validation');
-const { createRequireAuth } = require('../middleware/requireAuth');
+const ROOM_NOT_FOUND = (): HttpError => new HttpError(404, ERROR_CODES.ROOM_NOT_FOUND, 'Room not found');
 
-const ROOM_NOT_FOUND = () => new HttpError(404, 'ROOM_NOT_FOUND', 'Room not found');
-
-function createRoomsRouter({ config }) {
+export function createRoomsRouter({ config }: { config: Config }) {
   const router = express.Router();
   router.use(createRequireAuth(config.jwtSecret));
 
   // @route   POST /api/rooms
   router.post('/', async (req, res) => {
-    const name = normalizeRoomName(req.body && req.body.name);
-    const room = await roomService.createRoom({
-      name,
-      owner: req.user.username,
-      ownerId: req.user.id,
-    });
+    const body: Record<string, unknown> = req.body ?? {};
+    const name = normalizeRoomName(body.name);
+    const user = currentUser(req);
+    const room = await createRoom({ name, owner: user.username, ownerId: user.id });
 
-    res.status(201).json(roomService.toRoomDTO(room));
+    res.status(201).json(toRoomDTO(room));
   });
 
   // @route   GET /api/rooms/:roomId
   router.get('/:roomId', async (req, res) => {
     const roomId = normalizeRoomId(req.params.roomId);
-    const room = roomId ? await roomService.findRoom(roomId) : null;
+    const room = roomId ? await findRoom(roomId) : null;
     if (!room) throw ROOM_NOT_FOUND();
 
-    res.json(roomService.toRoomDTO(room));
+    res.json(toRoomDTO(room));
   });
 
   // @route   DELETE /api/rooms/:roomId  (owner only)
   router.delete('/:roomId', async (req, res) => {
     const roomId = normalizeRoomId(req.params.roomId);
-    const room = roomId ? await roomService.findRoom(roomId) : null;
-    if (!room) throw ROOM_NOT_FOUND();
-    if (String(room.ownerId) !== req.user.id) {
-      throw new HttpError(403, 'FORBIDDEN', 'Only the room owner can end this room');
+    const room = roomId ? await findRoom(roomId) : null;
+    if (!roomId || !room) throw ROOM_NOT_FOUND();
+    if (String(room.ownerId) !== currentUser(req).id) {
+      throw new HttpError(403, ERROR_CODES.FORBIDDEN, 'Only the room owner can end this room');
     }
 
-    await roomService.deleteRoom(roomId);
+    await deleteRoom(roomId);
 
-    const io = req.app.locals.io;
+    const io = req.app.locals.io as RoomServer | undefined;
     if (io) {
       io.to(roomId).emit('room:ended', { roomId, reason: 'deleted' });
       io.in(roomId).socketsLeave(roomId);
@@ -56,5 +55,3 @@ function createRoomsRouter({ config }) {
 
   return router;
 }
-
-module.exports = { createRoomsRouter };

@@ -1,13 +1,38 @@
-'use strict';
+import mongoose, { type Types } from 'mongoose';
+import { LIMITS, type MediaSource } from '@streamsync/shared';
 
-const mongoose = require('mongoose');
-const { MAX_MESSAGE_LENGTH, MAX_ROOM_NAME_LENGTH, DEFAULT_ROOM_NAME } = require('../lib/limits');
+export interface MessageRecord {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  username: string;
+  text: string;
+  createdAt: Date;
+}
+
+export interface PlaybackRecord {
+  source: MediaSource | null;
+  playing: boolean;
+  /** Seconds into the media at the moment `updatedAt` was recorded. */
+  position: number;
+  updatedAt: Date;
+}
+
+export interface RoomAttributes {
+  roomId: string;
+  name: string;
+  owner: string;
+  ownerId: Types.ObjectId;
+  messages: MessageRecord[];
+  playback: PlaybackRecord;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 const messageSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    username: { type: String, required: true, maxlength: 24 },
-    text: { type: String, required: true, maxlength: MAX_MESSAGE_LENGTH },
+    username: { type: String, required: true, maxlength: LIMITS.maxUsernameLength },
+    text: { type: String, required: true, maxlength: LIMITS.maxMessageLength },
     createdAt: { type: Date, default: Date.now },
   },
   { _id: true }
@@ -16,7 +41,7 @@ const messageSchema = new mongoose.Schema(
 const sourceSchema = new mongoose.Schema(
   {
     kind: { type: String, enum: ['youtube', 'media'], required: true },
-    url: { type: String, required: true, maxlength: 2048 },
+    url: { type: String, required: true, maxlength: LIMITS.maxUrlLength },
     youtubeId: { type: String },
     mediaType: { type: String, enum: ['audio', 'video'] },
     format: { type: String, enum: ['native', 'hls'] },
@@ -39,8 +64,8 @@ const playbackSchema = new mongoose.Schema(
 const roomSchema = new mongoose.Schema(
   {
     roomId: { type: String, required: true, unique: true, immutable: true, trim: true },
-    name: { type: String, default: DEFAULT_ROOM_NAME, trim: true, maxlength: MAX_ROOM_NAME_LENGTH },
-    owner: { type: String, required: true, maxlength: 24 },
+    name: { type: String, default: LIMITS.defaultRoomName, trim: true, maxlength: LIMITS.maxRoomNameLength },
+    owner: { type: String, required: true, maxlength: LIMITS.maxUsernameLength },
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     messages: { type: [messageSchema], default: [] },
     playback: { type: playbackSchema, default: () => ({}) },
@@ -48,4 +73,4 @@ const roomSchema = new mongoose.Schema(
   { timestamps: true, versionKey: false }
 );
 
-module.exports = mongoose.model('Room', roomSchema);
+export const Room = mongoose.model<RoomAttributes>('Room', roomSchema);

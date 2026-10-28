@@ -1,7 +1,5 @@
-'use strict';
-
-const { HttpError } = require('./httpError');
-const { MAX_URL_LENGTH } = require('./limits');
+import { ERROR_CODES, LIMITS, type MediaSource } from '@streamsync/shared';
+import { HttpError } from '../../http/http-error.js';
 
 const YOUTUBE_HOSTS = new Set([
   'youtube.com',
@@ -18,13 +16,16 @@ const YOUTUBE_PATH_PATTERN = /^\/(?:embed|shorts|live|v)\/([^/?#]+)/;
 const AUDIO_EXTENSIONS = new Set(['mp3', 'm4a', 'aac', 'wav', 'flac', 'oga', 'ogg', 'opus']);
 const HLS_EXTENSIONS = new Set(['m3u8']);
 
-const invalidSource = (message) => new HttpError(400, 'INVALID_SOURCE', message);
+type YouTubeSource = Extract<MediaSource, { kind: 'youtube' }>;
+type DirectMediaSource = Extract<MediaSource, { kind: 'media' }>;
+
+const invalidSource = (message: string): HttpError => new HttpError(400, ERROR_CODES.INVALID_SOURCE, message);
 
 /**
  * Parses a start offset into seconds. Accepts "90", "90s", "1m30s", "1h2m3s",
  * "1:30" and "1:02:03". Anything unrecognised starts at zero.
  */
-function parseStartTime(raw) {
+export function parseStartTime(raw: unknown): number {
   if (!raw) return 0;
   const value = String(raw).trim().toLowerCase();
 
@@ -45,12 +46,12 @@ function parseStartTime(raw) {
   return 0;
 }
 
-function isYouTubeUrl(url) {
+function isYouTubeUrl(url: URL): boolean {
   const host = url.hostname.toLowerCase();
   return YOUTUBE_HOSTS.has(host) || YOUTU_BE_HOSTS.has(host);
 }
 
-function extractYouTubeId(url) {
+function extractYouTubeId(url: URL): string | null {
   if (YOUTU_BE_HOSTS.has(url.hostname.toLowerCase())) {
     return url.pathname.slice(1).split('/')[0] || null;
   }
@@ -61,13 +62,13 @@ function extractYouTubeId(url) {
   return match ? match[1] : null;
 }
 
-function getExtension(pathname) {
+function getExtension(pathname: string): string {
   const fileName = pathname.split('/').pop() || '';
   const dot = fileName.lastIndexOf('.');
   return dot === -1 ? '' : fileName.slice(dot + 1).toLowerCase();
 }
 
-function youtubeSource(youtubeId, startAt) {
+function youtubeSource(youtubeId: string, startAt: number): YouTubeSource {
   return {
     kind: 'youtube',
     url: `https://www.youtube.com/watch?v=${youtubeId}`,
@@ -76,7 +77,7 @@ function youtubeSource(youtubeId, startAt) {
   };
 }
 
-function mediaSource(url) {
+function mediaSource(url: URL): DirectMediaSource {
   const extension = getExtension(url.pathname);
   return {
     kind: 'media',
@@ -92,17 +93,17 @@ function mediaSource(url) {
  * `{ kind: 'youtube', youtubeId, url, startAt }`; any other http(s) link becomes
  * `{ kind: 'media', url, mediaType, format, startAt }`. Throws an HttpError otherwise.
  */
-function parseMediaSource(input) {
+export function parseMediaSource(input: unknown): MediaSource {
   if (typeof input !== 'string') throw invalidSource('Paste a YouTube link or a direct media URL');
 
   const raw = input.trim();
-  if (!raw || raw.length > MAX_URL_LENGTH) {
-    throw invalidSource(`Paste a link of up to ${MAX_URL_LENGTH} characters`);
+  if (!raw || raw.length > LIMITS.maxUrlLength) {
+    throw invalidSource(`Paste a link of up to ${LIMITS.maxUrlLength} characters`);
   }
 
   if (YOUTUBE_ID_PATTERN.test(raw)) return youtubeSource(raw, 0);
 
-  let url;
+  let url: URL;
   try {
     url = new URL(raw);
   } catch {
@@ -126,5 +127,3 @@ function parseMediaSource(input) {
 
   return mediaSource(url);
 }
-
-module.exports = { parseMediaSource, parseStartTime };

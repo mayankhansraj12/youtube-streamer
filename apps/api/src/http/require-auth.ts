@@ -12,6 +12,7 @@ declare global {
 }
 
 const BEARER_PREFIX = 'Bearer ';
+const SESSION_EXPIRED_MESSAGE = 'Your session is missing or has expired. Please sign in again.';
 
 /** Accepts `Authorization: Bearer <token>`, with `x-auth-token` kept as a fallback. */
 export function createRequireAuth(secret: string) {
@@ -21,11 +22,17 @@ export function createRequireAuth(secret: string) {
 
     const user = verifySession(token, secret);
     if (!user) {
-      next(new HttpError(401, ERROR_CODES.UNAUTHORIZED, 'Your session is missing or has expired. Please sign in again.'));
+      next(new HttpError(401, ERROR_CODES.UNAUTHORIZED, SESSION_EXPIRED_MESSAGE));
       return;
     }
 
     req.user = user;
     next();
   };
+}
+
+/** The user that `requireAuth` verified for this request. Routes behind `requireAuth` always have one. */
+export function currentUser(req: Request): SessionUser {
+  if (!req.user) throw new HttpError(401, ERROR_CODES.UNAUTHORIZED, SESSION_EXPIRED_MESSAGE);
+  return req.user;
 }

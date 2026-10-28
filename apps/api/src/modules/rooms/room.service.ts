@@ -1,40 +1,54 @@
-'use strict';
-
-const mongoose = require('mongoose');
-const Room = require('../models/Room');
-const { generateRoomId } = require('../lib/ids');
-const { MAX_STORED_MESSAGES, SNAPSHOT_MESSAGE_COUNT } = require('../lib/limits');
+import mongoose from 'mongoose';
+import { LIMITS, type ChatMessage, type MediaSource, type PlaybackState, type RoomSummary } from '@streamsync/shared';
+import { generateRoomId } from '../../lib/ids.js';
+import { Room, type MessageRecord, type PlaybackRecord, type RoomAttributes } from './room.model.js';
 
 const DUPLICATE_KEY_ERROR = 11000;
 const MAX_ID_ATTEMPTS = 5;
 
-async function createRoom({ name, owner, ownerId }) {
-  let lastError = null;
+type RoomSummaryRecord = Pick<RoomAttributes, 'roomId' | 'name' | 'owner' | 'ownerId' | 'createdAt'>;
+type RoomSnapshotRecord = Pick<RoomAttributes, 'roomId' | 'name' | 'owner' | 'ownerId' | 'playback'> & {
+  messages?: MessageRecord[];
+};
+
+export async function createRoom({
+  name,
+  owner,
+  ownerId,
+}: {
+  name: string;
+  owner: string;
+  ownerId: string;
+}): Promise<RoomSummaryRecord> {
+  let lastError: unknown = null;
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
     try {
       return await Room.create({ roomId: generateRoomId(), name, owner, ownerId });
     } catch (err) {
-      if (err.code !== DUPLICATE_KEY_ERROR) throw err;
+      if ((err as { code?: number }).code !== DUPLICATE_KEY_ERROR) throw err;
       lastError = err;
     }
   }
   throw lastError;
 }
 
-function findRoom(roomId) {
-  return Room.findOne({ roomId }).select('roomId name owner ownerId createdAt').lean();
+export async function findRoom(roomId: string): Promise<RoomSummaryRecord | null> {
+  return Room.findOne({ roomId }).select('roomId name owner ownerId createdAt').lean<RoomSummaryRecord>();
 }
 
 /** Loads everything a client needs to render a room the moment it joins. */
-function findRoomForSnapshot(roomId) {
+export async function findRoomForSnapshot(roomId: string): Promise<RoomSnapshotRecord | null> {
   return Room.findOne({ roomId })
     .select('roomId name owner ownerId playback')
-    .slice('messages', -SNAPSHOT_MESSAGE_COUNT)
-    .lean();
+    .slice('messages', -LIMITS.snapshotMessageCount)
+    .lean<RoomSnapshotRecord>();
 }
 
-async function appendMessage(roomId, { userId, username, text }) {
-  const message = {
+export async function appendMessage(
+  roomId: string,
+  { userId, username, text }: { userId: string; username: string; text: string }
+): Promise<MessageRecord | null> {
+  const message: MessageRecord = {
     _id: new mongoose.Types.ObjectId(),
     userId: new mongoose.Types.ObjectId(userId),
     username,
@@ -43,7 +57,7 @@ async function appendMessage(roomId, { userId, username, text }) {
   };
   const result = await Room.updateOne(
     { roomId },
-    { $push: { messages: { $each: [message], $slice: -MAX_STORED_MESSAGES } } }
+    { $push: { messages: { $each: [message], $slice: -LIMITS.maxStoredMessages } } }
   );
   return result.matchedCount === 1 ? message : null;
 }
@@ -53,8 +67,12 @@ async function appendMessage(roomId, { userId, username, text }) {
  * resulting playback record. With `requireSource`, nothing is changed (resolves to null)
  * when no media is loaded.
  */
-async function updatePlayback(roomId, changes, { requireSource = false } = {}) {
-  const $set = { 'playback.updatedAt': new Date() };
+export async function updatePlayback(
+  roomId: string,
+  changes: Partial<Omit<PlaybackRecord, 'updatedAt'>>,
+  { requireSource = false }: { requireSource?: boolean } = {}
+): Promise<PlaybackRecord | null> {
+  const $set: Record<string, unknown> = { 'playback.updatedAt': new Date() };
   for (const [key, value] of Object.entries(changes)) {
     $set[`playback.${key}`] = value;
   }
@@ -68,12 +86,12 @@ async function updatePlayback(roomId, changes, { requireSource = false } = {}) {
   return room ? room.playback : null;
 }
 
-async function deleteRoom(roomId) {
+export async function deleteRoom(roomId: string): Promise<boolean> {
   const result = await Room.deleteOne({ roomId });
   return result.deletedCount === 1;
 }
 
-function toRoomDTO(room) {
+export function toRoomDTO(room: RoomSummaryRecord): RoomSummary {
   return {
     roomId: room.roomId,
     name: room.name,
@@ -83,7 +101,7 @@ function toRoomDTO(room) {
   };
 }
 
-function toMessageDTO(message) {
+export function toMessageDTO(message: MessageRecord): ChatMessage {
   return {
     id: String(message._id),
     userId: String(message.userId),
@@ -93,35 +111,20 @@ function toMessageDTO(message) {
   };
 }
 
-function toSourceDTO(source) {
+export function toSourceDTO(source: MediaSource | null | undefined): MediaSource | null {
   if (!source) return null;
-  return {
-    kind: source.kind,
-    url: source.url,
-    youtubeId: source.youtubeId,
-    mediaType: source.mediaType,
-    format: source.format,
-    startAt: source.startAt || 0,
-  };
+
+  const startAt = source.startAt || 0;
+  return source.kind === 'youtube'
+    ? { kind: 'youtube', url: source.url, youtubeId: source.youtubeId, startAt }
+    : { kind: 'media', url: source.url, mediaType: source.mediaType, format: source.format, startAt };
 }
 
-function toPlaybackDTO(playback) {
+export function toPlaybackDTO(playback: PlaybackRecord | null | undefined): PlaybackState {
   return {
-    source: toSourceDTO(playback && playback.source),
-    playing: Boolean(playback && playback.playing),
-    position: (playback && playback.position) || 0,
-    updatedAt: new Date((playback && playback.updatedAt) || Date.now()).getTime(),
+    source: toSourceDTO(playback?.source),
+    playing: Boolean(playback?.playing),
+    position: playback?.position || 0,
+    updatedAt: new Date(playback?.updatedAt || Date.now()).getTime(),
   };
 }
-
-module.exports = {
-  createRoom,
-  findRoom,
-  findRoomForSnapshot,
-  appendMessage,
-  updatePlayback,
-  deleteRoom,
-  toRoomDTO,
-  toMessageDTO,
-  toPlaybackDTO,
-};
