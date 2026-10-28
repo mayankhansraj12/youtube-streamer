@@ -246,8 +246,9 @@ function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
     reply(ack, { playback: dto });
   });
 
-  // WebRTC signalling is relayed only between sockets that share a room.
-  socket.on('rtc:signal', async (payload) => {
+  // WebRTC signalling is relayed only between sockets that share a room. Each sender's relays run
+  // one at a time, so a peer receives an offer before the candidates that belong to it.
+  const relaySignal = async (payload) => {
     const roomId = socket.data.roomId;
     if (!roomId || !socket.rooms.has(roomId) || !limits.signal.take()) return;
 
@@ -262,6 +263,13 @@ function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
     if (!target || !target.rooms.has(roomId)) return;
 
     io.to(to).emit('rtc:signal', { from: socket.id, description, candidate });
+  };
+
+  let signalChain = Promise.resolve();
+  socket.on('rtc:signal', (payload) => {
+    signalChain = signalChain
+      .then(() => relaySignal(payload))
+      .catch((err) => console.error(`[socket ${socket.id}] rtc:signal failed:`, err));
   });
 
   socket.on('disconnecting', () => {
