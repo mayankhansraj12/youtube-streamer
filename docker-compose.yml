@@ -12,9 +12,10 @@ services:
       timeout: 5s
       retries: 10
 
-  server:
+  api:
     build:
-      context: ./server
+      context: .
+      dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -28,16 +29,17 @@ services:
       mongo:
         condition: service_healthy
 
-  client:
+  web:
     build:
-      context: ./client
+      context: .
+      dockerfile: apps/web/Dockerfile
       args:
         VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:5000}
     restart: unless-stopped
     ports:
       - "8080:80"
     depends_on:
-      - server
+      - api
 
 volumes:
   mongo-data:
