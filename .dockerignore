@@ -1,0 +1,13 @@
+# Keep local secrets, build output, git metadata and scratch files out of every image build.
+.git
+.github
+.workspace
+assets
+**/node_modules
+**/dist
+**/.vite
+**/*.log
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+!**/.env.example
