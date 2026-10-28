@@ -1,17 +1,17 @@
-'use strict';
-
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const mongoose = require('mongoose');
-const { createAuthRouter } = require('./routes/auth');
-const { createRoomsRouter } = require('./routes/rooms');
-const { createCorsOriginCheck } = require('./lib/origins');
-const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
+import cors from 'cors';
+import express from 'express';
+import helmet from 'helmet';
+import mongoose from 'mongoose';
+import type { HealthResponse } from '@streamsync/shared';
+import type { Config } from './config.js';
+import { notFoundHandler, errorHandler } from './http/error-handler.js';
+import { createCorsOriginCheck } from './lib/origins.js';
+import { createAuthRouter } from './modules/auth/auth.routes.js';
+import { createRoomsRouter } from './modules/rooms/rooms.routes.js';
 
 const DATABASE_CONNECTED = 1;
 
-function createApp({ config }) {
+export function createApp({ config }: { config: Config }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -20,17 +20,18 @@ function createApp({ config }) {
   app.use(cors({ origin: createCorsOriginCheck(config.clientOrigins) }));
   app.use(express.json({ limit: '16kb' }));
 
-  app.get('/', (req, res) => {
+  app.get('/', (_req, res) => {
     res.json({ service: 'streamsync-api', status: 'ok' });
   });
 
-  app.get('/api/health', (req, res) => {
+  app.get('/api/health', (_req, res) => {
     const databaseReady = mongoose.connection.readyState === DATABASE_CONNECTED;
-    res.status(databaseReady ? 200 : 503).json({
+    const body: HealthResponse = {
       status: databaseReady ? 'ok' : 'degraded',
       database: databaseReady ? 'connected' : 'disconnected',
       uptimeSeconds: Math.round(process.uptime()),
-    });
+    };
+    res.status(databaseReady ? 200 : 503).json(body);
   });
 
   app.use('/api/auth', createAuthRouter({ config }));
@@ -41,5 +42,3 @@ function createApp({ config }) {
 
   return app;
 }
-
-module.exports = { createApp };

@@ -1,16 +1,14 @@
-'use strict';
-
-const http = require('node:http');
-const { loadConfig } = require('./config');
-const { connectDatabase, disconnectDatabase } = require('./db');
-const { createApp } = require('./app');
-const { createSocketServer } = require('./socket');
-const User = require('./models/User');
-const Room = require('./models/Room');
+import http from 'node:http';
+import { createApp } from './app.js';
+import { loadConfig } from './config.js';
+import { connectDatabase, disconnectDatabase } from './database.js';
+import { User } from './modules/auth/user.model.js';
+import { Room } from './modules/rooms/room.model.js';
+import { createSocketServer } from './realtime/socket-server.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 
-async function start() {
+async function start(): Promise<void> {
   const config = loadConfig();
 
   await connectDatabase(config.mongoUri);
@@ -26,7 +24,7 @@ async function start() {
   });
 
   let shuttingDown = false;
-  const shutdown = (signal) => {
+  const shutdown = (signal: NodeJS.Signals): void => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`${signal} received, shutting down`);
@@ -36,7 +34,7 @@ async function start() {
 
     io.close(() => {
       disconnectDatabase()
-        .catch((err) => console.error('Error while closing MongoDB:', err.message))
+        .catch((err: Error) => console.error('Error while closing MongoDB:', err.message))
         .finally(() => process.exit(0));
     });
   };
@@ -45,7 +43,7 @@ async function start() {
   process.once('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-start().catch((err) => {
+start().catch((err: Error) => {
   console.error('Failed to start StreamSync API:', err.message);
   process.exit(1);
 });
