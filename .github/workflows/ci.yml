@@ -1,50 +1,51 @@
-name: StreamSync CI
+name: CI
 
 on:
-  pull_request:
-    branches: [ main, develop ]
   push:
-    branches: [ develop ]
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  server:
+    name: Server tests (Node 22)
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [18.x]
-
+    defaults:
+      run:
+        working-directory: server
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm test
 
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-        cache-dependency-path: '**/package-lock.json'
-
-    # SERVER CHECK
-    - name: Install Server Dependencies
-      run: |
-        cd server
-        npm ci
-
-    - name: Lint Server (Optional)
-      run: |
-        # Add lint command if script exists, otherwise skip
-        echo "Skipping server lint for now"
-
-    # CLIENT CHECK
-    - name: Install Client Dependencies
-      run: |
-        cd client
-        npm ci
-
-    - name: Build Client
-      run: |
-        cd client
-        npm run build
-      env:
-        # Mock env var for build
-        VITE_BACKEND_URL: "http://localhost:5000"
+  client:
+    name: Client checks (Node 22)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    env:
+      VITE_BACKEND_URL: http://localhost:5000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
