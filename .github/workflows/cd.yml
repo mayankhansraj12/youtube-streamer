@@ -31,19 +31,21 @@ jobs:
       - name: Build and push the API image
         uses: docker/build-push-action@v6
         with:
-          context: ./server
+          context: .
+          file: apps/api/Dockerfile
           push: true
           tags: |
-            ${{ steps.image.outputs.prefix }}/server:${{ github.ref_name }}
-            ${{ steps.image.outputs.prefix }}/server:latest
+            ${{ steps.image.outputs.prefix }}/api:${{ github.ref_name }}
+            ${{ steps.image.outputs.prefix }}/api:latest
 
-      - name: Build and push the client image
+      - name: Build and push the web image
         uses: docker/build-push-action@v6
         with:
-          context: ./client
+          context: .
+          file: apps/web/Dockerfile
           push: true
           build-args: |
             VITE_BACKEND_URL=${{ vars.VITE_BACKEND_URL }}
           tags: |
-            ${{ steps.image.outputs.prefix }}/client:${{ github.ref_name }}
-            ${{ steps.image.outputs.prefix }}/client:latest
+            ${{ steps.image.outputs.prefix }}/web:${{ github.ref_name }}
+            ${{ steps.image.outputs.prefix }}/web:latest
