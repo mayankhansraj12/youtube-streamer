@@ -1,12 +1,11 @@
-'use strict';
-
-const { describe, it, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const { startTestServer } = require('../helpers/testServer');
-const { api, createAccount, connectSocket, emit, nextEvent } = require('../helpers/client');
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import type { ApiErrorBody, RoomSummary } from '@streamsync/shared';
+import { startTestServer, type TestServer } from '../helpers/testServer.js';
+import { api, createAccount, connectSocket, emit, nextEvent } from '../helpers/client.js';
 
 describe('room REST API', () => {
-  let server;
+  let server: TestServer;
 
   before(async () => {
     server = await startTestServer();
@@ -18,7 +17,7 @@ describe('room REST API', () => {
 
   it('creates rooms with sanitised names and generated ids', async () => {
     const owner = await createAccount(server.baseUrl, 'roomowner');
-    const res = await api(server.baseUrl, 'POST', '/api/rooms', {
+    const res = await api<RoomSummary>(server.baseUrl, 'POST', '/api/rooms', {
       token: owner.token,
       body: { name: '   Movie    night  ' },
     });
@@ -28,14 +27,16 @@ describe('room REST API', () => {
     assert.equal(res.body.name, 'Movie night');
     assert.equal(res.body.ownerId, owner.id);
 
-    const fetched = await api(server.baseUrl, 'GET', `/api/rooms/${res.body.roomId.toUpperCase()}`, { token: owner.token });
+    const fetched = await api<RoomSummary>(server.baseUrl, 'GET', `/api/rooms/${res.body.roomId.toUpperCase()}`, {
+      token: owner.token,
+    });
     assert.equal(fetched.status, 200);
     assert.equal(fetched.body.name, 'Movie night');
   });
 
   it('falls back to the default name when none is given', async () => {
     const owner = await createAccount(server.baseUrl, 'defaultname');
-    const res = await api(server.baseUrl, 'POST', '/api/rooms', { token: owner.token, body: {} });
+    const res = await api<RoomSummary>(server.baseUrl, 'POST', '/api/rooms', { token: owner.token, body: {} });
     assert.equal(res.status, 201);
     assert.equal(res.body.name, 'Untitled Room');
   });
@@ -43,7 +44,7 @@ describe('room REST API', () => {
   it('returns 404 for unknown or malformed room ids and requires a session', async () => {
     const owner = await createAccount(server.baseUrl, 'lookup');
 
-    const missing = await api(server.baseUrl, 'GET', '/api/rooms/zzzzzzzz', { token: owner.token });
+    const missing = await api<ApiErrorBody>(server.baseUrl, 'GET', '/api/rooms/zzzzzzzz', { token: owner.token });
     assert.equal(missing.status, 404);
     assert.equal(missing.body.code, 'ROOM_NOT_FOUND');
 
@@ -58,14 +59,17 @@ describe('room REST API', () => {
     const owner = await createAccount(server.baseUrl, 'ender');
     const guest = await createAccount(server.baseUrl, 'lurker');
 
-    const created = await api(server.baseUrl, 'POST', '/api/rooms', { token: owner.token, body: { name: 'Doomed' } });
+    const created = await api<RoomSummary>(server.baseUrl, 'POST', '/api/rooms', {
+      token: owner.token,
+      body: { name: 'Doomed' },
+    });
     const roomId = created.body.roomId;
 
     const guestSocket = await connectSocket(server.baseUrl, guest.token);
     const joined = await emit(guestSocket, 'room:join', { roomId, muted: true });
     assert.equal(joined.ok, true);
 
-    const forbidden = await api(server.baseUrl, 'DELETE', `/api/rooms/${roomId}`, { token: guest.token });
+    const forbidden = await api<ApiErrorBody>(server.baseUrl, 'DELETE', `/api/rooms/${roomId}`, { token: guest.token });
     assert.equal(forbidden.status, 403);
     assert.equal(forbidden.body.code, 'FORBIDDEN');
 

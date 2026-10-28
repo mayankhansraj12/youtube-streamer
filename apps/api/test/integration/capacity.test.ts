@@ -1,13 +1,12 @@
-'use strict';
-
-const { describe, it, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const { startTestServer } = require('../helpers/testServer');
-const { api, createAccount, connectSocket, emit } = require('../helpers/client');
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import type { RoomSummary } from '@streamsync/shared';
+import { startTestServer, type TestServer } from '../helpers/testServer.js';
+import { api, createAccount, connectSocket, emit, type ConnectedSocket } from '../helpers/client.js';
 
 describe('room capacity', () => {
-  let server;
-  const sockets = [];
+  let server: TestServer;
+  const sockets: ConnectedSocket[] = [];
 
   before(async () => {
     server = await startTestServer({ maxRoomParticipants: 2 });
@@ -20,7 +19,10 @@ describe('room capacity', () => {
 
   it('refuses joins beyond MAX_ROOM_PARTICIPANTS with ROOM_FULL', async () => {
     const owner = await createAccount(server.baseUrl, 'capacity');
-    const created = await api(server.baseUrl, 'POST', '/api/rooms', { token: owner.token, body: { name: 'Small' } });
+    const created = await api<RoomSummary>(server.baseUrl, 'POST', '/api/rooms', {
+      token: owner.token,
+      body: { name: 'Small' },
+    });
     const roomId = created.body.roomId;
 
     for (let i = 0; i < 2; i += 1) {

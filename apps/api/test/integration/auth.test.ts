@@ -1,13 +1,15 @@
-'use strict';
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import type { ApiErrorBody, AuthSession, CurrentUserResponse, HealthResponse } from '@streamsync/shared';
+import { startTestServer, type TestServer } from '../helpers/testServer.js';
+import { PASSWORD, uniqueUsername, api, createAccount } from '../helpers/client.js';
+import { User } from '../../src/modules/auth/user.model.js';
 
-const { describe, it, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const { startTestServer } = require('../helpers/testServer');
-const { PASSWORD, uniqueUsername, api, createAccount } = require('../helpers/client');
-const User = require('../../src/models/User');
+/** The contract has no password field. Declaring it optional lets the test assert that it is absent. */
+type MeResponse = CurrentUserResponse & { user: { password?: string } };
 
 describe('auth API', () => {
-  let server;
+  let server: TestServer;
 
   before(async () => {
     server = await startTestServer();
@@ -19,7 +21,9 @@ describe('auth API', () => {
 
   it('creates accounts without an email and returns a session', async () => {
     const username = uniqueUsername('noemail');
-    const res = await api(server.baseUrl, 'POST', '/api/auth/signup', { body: { username, password: PASSWORD } });
+    const res = await api<AuthSession>(server.baseUrl, 'POST', '/api/auth/signup', {
+      body: { username, password: PASSWORD },
+    });
 
     assert.equal(res.status, 201);
     assert.equal(typeof res.body.token, 'string');
@@ -30,13 +34,13 @@ describe('auth API', () => {
   it('rejects duplicate usernames and emails with stable error codes', async () => {
     const account = await createAccount(server.baseUrl, 'dup');
 
-    const sameName = await api(server.baseUrl, 'POST', '/api/auth/signup', {
+    const sameName = await api<ApiErrorBody>(server.baseUrl, 'POST', '/api/auth/signup', {
       body: { username: account.username, password: PASSWORD },
     });
     assert.equal(sameName.status, 409);
     assert.equal(sameName.body.code, 'USERNAME_TAKEN');
 
-    const sameEmail = await api(server.baseUrl, 'POST', '/api/auth/signup', {
+    const sameEmail = await api<ApiErrorBody>(server.baseUrl, 'POST', '/api/auth/signup', {
       body: { username: uniqueUsername('other'), email: `${account.username}@example.com`, password: PASSWORD },
     });
     assert.equal(sameEmail.status, 409);
@@ -44,7 +48,7 @@ describe('auth API', () => {
   });
 
   it('validates input and rejects weak passwords and malformed JSON', async () => {
-    const weak = await api(server.baseUrl, 'POST', '/api/auth/signup', {
+    const weak = await api<ApiErrorBody>(server.baseUrl, 'POST', '/api/auth/signup', {
       body: { username: uniqueUsername('weak'), password: 'short' },
     });
     assert.equal(weak.status, 400);
@@ -55,7 +59,9 @@ describe('auth API', () => {
     });
     assert.equal(badName.status, 400);
 
-    const malformed = await api(server.baseUrl, 'POST', '/api/auth/signup', { rawBody: '{"username":' });
+    const malformed = await api<ApiErrorBody>(server.baseUrl, 'POST', '/api/auth/signup', {
+      rawBody: '{"username":',
+    });
     assert.equal(malformed.status, 400);
     assert.equal(malformed.body.code, 'INVALID_JSON');
   });
@@ -73,13 +79,13 @@ describe('auth API', () => {
     });
     assert.equal(byEmail.status, 200);
 
-    const wrongPassword = await api(server.baseUrl, 'POST', '/api/auth/login', {
+    const wrongPassword = await api<ApiErrorBody>(server.baseUrl, 'POST', '/api/auth/login', {
       body: { identifier: account.username, password: 'not-the-password' },
     });
     assert.equal(wrongPassword.status, 401);
     assert.equal(wrongPassword.body.code, 'INVALID_CREDENTIALS');
 
-    const unknown = await api(server.baseUrl, 'POST', '/api/auth/login', {
+    const unknown = await api<ApiErrorBody>(server.baseUrl, 'POST', '/api/auth/login', {
       body: { identifier: uniqueUsername('ghost'), password: PASSWORD },
     });
     assert.equal(unknown.status, 401);
@@ -89,7 +95,8 @@ describe('auth API', () => {
   it('stores passwords hashed and keeps accounts usable after unrelated saves', async () => {
     const account = await createAccount(server.baseUrl, 'hash');
 
-    const stored = await User.findById(account.id).select('+password');
+    // createAccount has just saved this user, so the lookup always finds it.
+    const stored = (await User.findById(account.id).select('+password'))!;
     assert.match(stored.password, /^\$2[aby]\$/);
     assert.notEqual(stored.password, PASSWORD);
 
@@ -105,12 +112,12 @@ describe('auth API', () => {
   it('protects /me with the session token and never exposes the password', async () => {
     const account = await createAccount(server.baseUrl, 'me');
 
-    const me = await api(server.baseUrl, 'GET', '/api/auth/me', { token: account.token });
+    const me = await api<MeResponse>(server.baseUrl, 'GET', '/api/auth/me', { token: account.token });
     assert.equal(me.status, 200);
     assert.equal(me.body.user.username, account.username);
     assert.equal(me.body.user.password, undefined);
 
-    const anonymous = await api(server.baseUrl, 'GET', '/api/auth/me');
+    const anonymous = await api<ApiErrorBody>(server.baseUrl, 'GET', '/api/auth/me');
     assert.equal(anonymous.status, 401);
     assert.equal(anonymous.body.code, 'UNAUTHORIZED');
 
@@ -119,7 +126,7 @@ describe('auth API', () => {
   });
 
   it('answers health checks with database status', async () => {
-    const res = await api(server.baseUrl, 'GET', '/api/health');
+    const res = await api<HealthResponse>(server.baseUrl, 'GET', '/api/health');
     assert.equal(res.status, 200);
     assert.equal(res.body.database, 'connected');
   });

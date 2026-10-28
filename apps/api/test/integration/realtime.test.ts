@@ -1,20 +1,30 @@
-'use strict';
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import type { MediaSource, RoomSummary } from '@streamsync/shared';
+import { startTestServer, type TestServer } from '../helpers/testServer.js';
+import {
+  api,
+  createAccount,
+  connectSocket,
+  emit,
+  nextEvent,
+  type Account,
+  type ConnectedSocket,
+  type ReplyOf,
+} from '../helpers/client.js';
 
-const { describe, it, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const { startTestServer } = require('../helpers/testServer');
-const { api, createAccount, connectSocket, emit, nextEvent } = require('../helpers/client');
+type YouTubeSource = Extract<MediaSource, { kind: 'youtube' }>;
 
 describe('realtime room protocol', () => {
-  let server;
-  const sockets = [];
-  const track = async (token) => {
+  let server: TestServer;
+  const sockets: ConnectedSocket[] = [];
+  const track = async (token: string): Promise<ConnectedSocket> => {
     const socket = await connectSocket(server.baseUrl, token);
     sockets.push(socket);
     return socket;
   };
-  const createRoom = async (owner, name = 'Realtime room') => {
-    const res = await api(server.baseUrl, 'POST', '/api/rooms', { token: owner.token, body: { name } });
+  const createRoom = async (owner: Account, name = 'Realtime room'): Promise<RoomSummary> => {
+    const res = await api<RoomSummary>(server.baseUrl, 'POST', '/api/rooms', { token: owner.token, body: { name } });
     assert.equal(res.status, 201);
     return res.body;
   };
@@ -29,8 +39,8 @@ describe('realtime room protocol', () => {
   });
 
   it('refuses socket connections without a valid session token', async () => {
-    await assert.rejects(connectSocket(server.baseUrl, undefined), (err) => err.message === 'UNAUTHORIZED');
-    await assert.rejects(connectSocket(server.baseUrl, 'not-a-jwt'), (err) => err.message === 'UNAUTHORIZED');
+    await assert.rejects(connectSocket(server.baseUrl, undefined), (err: Error) => err.message === 'UNAUTHORIZED');
+    await assert.rejects(connectSocket(server.baseUrl, 'not-a-jwt'), (err: Error) => err.message === 'UNAUTHORIZED');
   });
 
   it('synchronises presence, chat, playback and mute state across participants', async () => {
@@ -55,10 +65,10 @@ describe('realtime room protocol', () => {
     assert.equal(guestJoin.ok, true);
 
     const joinEvent = await hostSeesGuest;
-    assert.equal(joinEvent.event.participant.username, guest.username);
+    assert.equal(joinEvent.event!.participant.username, guest.username);
     assert.equal(joinEvent.participants.length, 2);
     const guestEntry = guestJoin.snapshot.participants.find((p) => p.socketId === guestSocket.id);
-    assert.equal(guestEntry.muted, true, 'participants join muted unless they say otherwise');
+    assert.equal(guestEntry!.muted, true, 'participants join muted unless they say otherwise');
 
     const chatAtGuest = nextEvent(guestSocket, 'chat:message');
     const sent = await emit(hostSocket, 'chat:send', { text: '  hello there\u0007  ' });
@@ -70,8 +80,8 @@ describe('realtime room protocol', () => {
     const stateAtGuest = nextEvent(guestSocket, 'playback:state');
     const loaded = await emit(hostSocket, 'playback:set-source', { url: 'https://youtu.be/dQw4w9WgXcQ?t=30' });
     assert.equal(loaded.ok, true);
-    assert.equal(loaded.playback.source.kind, 'youtube');
-    assert.equal(loaded.playback.source.youtubeId, 'dQw4w9WgXcQ');
+    assert.equal(loaded.playback.source!.kind, 'youtube');
+    assert.equal(loaded.playback.source!.youtubeId, 'dQw4w9WgXcQ');
     assert.equal(loaded.playback.position, 30);
     assert.equal((await stateAtGuest).playing, true);
 
@@ -82,10 +92,12 @@ describe('realtime room protocol', () => {
 
     const lateSocket = await track(late.token);
     const lateJoin = await emit(lateSocket, 'room:join', { roomId: room.roomId, muted: true });
-    assert.equal(lateJoin.snapshot.playback.source.youtubeId, 'dQw4w9WgXcQ');
+    // The ok check narrows the reply to its snapshot. The cast records that the source is the YouTube link loaded above.
+    assert.equal(lateJoin.ok, true);
+    assert.equal((lateJoin.snapshot.playback.source as YouTubeSource).youtubeId, 'dQw4w9WgXcQ');
     assert.equal(lateJoin.snapshot.playback.playing, false);
     assert.equal(lateJoin.snapshot.playback.position, 42.5);
-    assert.equal(lateJoin.snapshot.messages.at(-1).text, 'hello there');
+    assert.equal(lateJoin.snapshot.messages.at(-1)!.text, 'hello there');
     assert.equal(lateJoin.snapshot.participants.length, 3);
 
     const guestUnmuted = nextEvent(hostSocket, 'presence:update', (p) =>
@@ -138,7 +150,7 @@ describe('realtime room protocol', () => {
     const socket = await track(host.token);
     await emit(socket, 'room:join', { roomId: room.roomId });
 
-    const replies = [];
+    const replies: ReplyOf<'chat:send'>[] = [];
     for (let i = 0; i < 8; i += 1) {
       replies.push(await emit(socket, 'chat:send', { text: `message ${i}` }));
     }
@@ -168,7 +180,7 @@ describe('realtime room protocol', () => {
     hostSocket.emit('rtc:signal', { to: peerSocket.id, description: { type: 'offer', sdp: 'v=0' } });
     const relayed = await offer;
     assert.equal(relayed.from, hostSocket.id);
-    assert.equal(relayed.description.type, 'offer');
+    assert.equal(relayed.description!.type, 'offer');
 
     hostSocket.emit('rtc:signal', { to: outsiderSocket.id, description: { type: 'offer', sdp: 'v=0' } });
     const candidateAtPeer = nextEvent(peerSocket, 'rtc:signal');
@@ -195,7 +207,7 @@ describe('realtime room protocol', () => {
     guestSocket.close();
 
     const payload = await left;
-    assert.equal(payload.event.participant.username, guest.username);
+    assert.equal(payload.event!.participant.username, guest.username);
     assert.equal(payload.participants.length, 1);
   });
 });
