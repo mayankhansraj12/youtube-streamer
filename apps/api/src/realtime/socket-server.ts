@@ -1,21 +1,23 @@
-'use strict';
-
-const { Server } = require('socket.io');
-const { verifySession } = require('../lib/auth');
-const { createCorsOriginCheck } = require('../lib/origins');
-const { registerRoomHandlers } = require('./roomHandlers');
+import type { Server as HttpServer } from 'node:http';
+import { Server } from 'socket.io';
+import type { ClientToServerEvents, ServerToClientEvents } from '@streamsync/shared';
+import type { Config } from '../config.js';
+import { createCorsOriginCheck } from '../lib/origins.js';
+import { verifySession } from '../lib/session-token.js';
+import { registerRoomHandlers } from './room-protocol.js';
+import type { RoomServer, SocketData } from './types.js';
 
 const MAX_SOCKET_PAYLOAD_BYTES = 256 * 1024;
 
 /** Enables cross-instance broadcasting. Startup fails when REDIS_URL is set but unreachable. */
-async function attachRedisAdapter(io, redisUrl) {
-  const { createAdapter } = require('@socket.io/redis-adapter');
-  const { createClient } = require('redis');
+async function attachRedisAdapter(io: RoomServer, redisUrl: string): Promise<void> {
+  const { createAdapter } = await import('@socket.io/redis-adapter');
+  const { createClient } = await import('redis');
 
   const pubClient = createClient({ url: redisUrl });
   const subClient = pubClient.duplicate();
   for (const client of [pubClient, subClient]) {
-    client.on('error', (err) => console.error('Redis error:', err.message));
+    client.on('error', (err: Error) => console.error('Redis error:', err.message));
   }
 
   await Promise.all([pubClient.connect(), subClient.connect()]);
@@ -23,8 +25,8 @@ async function attachRedisAdapter(io, redisUrl) {
   console.log('Socket.IO Redis adapter connected');
 }
 
-async function createSocketServer(httpServer, { config }) {
-  const io = new Server(httpServer, {
+export async function createSocketServer(httpServer: HttpServer, { config }: { config: Config }): Promise<RoomServer> {
+  const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<never, never>, SocketData>(httpServer, {
     cors: {
       origin: createCorsOriginCheck(config.clientOrigins),
       methods: ['GET', 'POST'],
@@ -38,7 +40,7 @@ async function createSocketServer(httpServer, { config }) {
 
   // Identity comes from the signed token, never from client-supplied fields.
   io.use((socket, next) => {
-    const user = verifySession(socket.handshake.auth && socket.handshake.auth.token, config.jwtSecret);
+    const user = verifySession(socket.handshake.auth?.token, config.jwtSecret);
     if (!user) return next(new Error('UNAUTHORIZED'));
 
     socket.data.user = user;
@@ -51,5 +53,3 @@ async function createSocketServer(httpServer, { config }) {
 
   return io;
 }
-
-module.exports = { createSocketServer };

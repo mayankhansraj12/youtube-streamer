@@ -1,35 +1,60 @@
-'use strict';
+import {
+  ERROR_CODES,
+  LIMITS,
+  type Ack,
+  type AckReply,
+  type ClientToServerEvents,
+  type ErrorCode,
+  type IceCandidatePayload,
+  type Participant,
+  type SessionDescriptionPayload,
+  type SignalRequest,
+} from '@streamsync/shared';
+import type { Config } from '../config.js';
+import { HttpError } from '../http/http-error.js';
+import { normalizeRoomId } from '../lib/ids.js';
+import { createRateLimiter } from '../lib/rate-limiter.js';
+import { normalizeMessageText, requireBoolean, requirePosition } from '../lib/validation.js';
+import { parseMediaSource } from '../modules/media/media-source.js';
+import {
+  appendMessage,
+  findRoom,
+  findRoomForSnapshot,
+  toMessageDTO,
+  toPlaybackDTO,
+  updatePlayback,
+} from '../modules/rooms/room.service.js';
+import type { RoomServer, RoomSocket, SocketData } from './types.js';
 
-const roomService = require('../services/roomService');
-const { normalizeRoomId } = require('../lib/ids');
-const { parseMediaSource } = require('../lib/mediaSource');
-const { createRateLimiter } = require('../lib/rateLimiter');
-const { HttpError } = require('../lib/httpError');
-const { normalizeMessageText, requireBoolean, requirePosition } = require('../lib/validation');
-const { MAX_MESSAGE_LENGTH, MAX_SDP_LENGTH, MAX_ICE_CANDIDATE_LENGTH } = require('../lib/limits');
+const SDP_TYPES: ReadonlySet<string> = new Set(['offer', 'answer', 'pranswer', 'rollback']);
 
-const SDP_TYPES = new Set(['offer', 'answer', 'pranswer', 'rollback']);
+type ClientEvent = keyof ClientToServerEvents;
+type ClientEventArgs<E extends ClientEvent> = Parameters<ClientToServerEvents[E]>;
 
-function reply(ack, payload = {}) {
-  if (typeof ack === 'function') ack({ ok: true, ...payload });
+function reply<T extends object = Record<string, never>>(ack: Ack<T> | undefined, payload?: T): void {
+  if (typeof ack === 'function') ack({ ok: true, ...payload } as AckReply<T>);
 }
 
-function fail(ack, code, message) {
+function fail(ack: unknown, code: ErrorCode, message: string): void {
   if (typeof ack === 'function') ack({ ok: false, code, message });
 }
 
-function toParticipant(socketId, data) {
+function toParticipant(socketId: string, data: SocketData): Participant {
   return {
     socketId,
     userId: data.user.id,
     username: data.user.username,
     muted: Boolean(data.muted),
-    joinedAt: data.joinedAt,
+    joinedAt: data.joinedAt ?? 0,
   };
 }
 
 /** Presence is derived from live sockets, so it stays correct across restarts and multiple nodes. */
-async function listParticipants(io, roomId, excludeId = null) {
+export async function listParticipants(
+  io: RoomServer,
+  roomId: string,
+  excludeId: string | null = null
+): Promise<Participant[]> {
   const sockets = await io.in(roomId).fetchSockets();
   return sockets
     .filter((remote) => remote.id !== excludeId && remote.data.roomId === roomId)
@@ -37,7 +62,7 @@ async function listParticipants(io, roomId, excludeId = null) {
     .sort((a, b) => a.joinedAt - b.joinedAt);
 }
 
-async function leaveRoom(io, socket) {
+async function leaveRoom(io: RoomServer, socket: RoomSocket): Promise<void> {
   const roomId = socket.data.roomId;
   if (!roomId) return;
 
@@ -51,23 +76,60 @@ async function leaveRoom(io, socket) {
   io.to(roomId).emit('presence:update', { participants, event: { type: 'left', participant } });
 }
 
-function sanitizeDescription(value) {
+function sanitizeDescription(value: unknown): SessionDescriptionPayload | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  if (!SDP_TYPES.has(value.type) || typeof value.sdp !== 'string' || value.sdp.length > MAX_SDP_LENGTH) {
+
+  const { type, sdp } = value as { type?: unknown; sdp?: unknown };
+  if (
+    typeof type !== 'string' ||
+    !SDP_TYPES.has(type) ||
+    typeof sdp !== 'string' ||
+    sdp.length > LIMITS.maxSdpLength
+  ) {
     return undefined;
   }
-  return { type: value.type, sdp: value.sdp };
+  return { type: type as SessionDescriptionPayload['type'], sdp };
 }
 
-function sanitizeCandidate(value) {
+function sanitizeCandidate(value: unknown): IceCandidatePayload | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  if (typeof value.candidate !== 'string' || value.candidate.length > MAX_ICE_CANDIDATE_LENGTH) {
+
+  const { candidate, sdpMid, sdpMLineIndex } = value as {
+    candidate?: unknown;
+    sdpMid?: unknown;
+    sdpMLineIndex?: unknown;
+  };
+  if (typeof candidate !== 'string' || candidate.length > LIMITS.maxIceCandidateLength) {
     return undefined;
   }
   return {
-    candidate: value.candidate,
-    sdpMid: typeof value.sdpMid === 'string' ? value.sdpMid : null,
-    sdpMLineIndex: Number.isInteger(value.sdpMLineIndex) ? value.sdpMLineIndex : null,
+    candidate,
+    sdpMid: typeof sdpMid === 'string' ? sdpMid : null,
+    sdpMLineIndex: Number.isInteger(sdpMLineIndex) ? (sdpMLineIndex as number) : null,
+  };
+}
+
+/**
+ * Wraps a client event handler so that errors become coded acknowledgements instead of
+ * crashing the socket. The handler receives the arguments exactly as the client sent them.
+ */
+function guard<E extends ClientEvent>(
+  socket: RoomSocket,
+  event: E,
+  handler: (...args: ClientEventArgs<E>) => Promise<void>
+) {
+  return async (...args: ClientEventArgs<E>): Promise<void> => {
+    try {
+      await handler(...args);
+    } catch (err) {
+      const ack: unknown = args[args.length - 1];
+      if (err instanceof HttpError) {
+        fail(ack, err.code, err.message);
+        return;
+      }
+      console.error(`[socket ${socket.id}] ${event} failed:`, err);
+      fail(ack, ERROR_CODES.INTERNAL_ERROR, 'Something went wrong. Please try again.');
+    }
   };
 }
 
@@ -75,188 +137,199 @@ function sanitizeCandidate(value) {
  * Registers every realtime room event for one socket. Each socket holds at most one
  * room at a time, and every handler that touches room state checks membership first.
  */
-function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
+export function registerRoomHandlers(
+  io: RoomServer,
+  socket: RoomSocket,
+  { maxRoomParticipants }: Pick<Config, 'maxRoomParticipants'>
+): void {
   const limits = {
     chat: createRateLimiter({ capacity: 5, refillPerSecond: 1 }),
     playback: createRateLimiter({ capacity: 20, refillPerSecond: 5 }),
     signal: createRateLimiter({ capacity: 400, refillPerSecond: 200 }),
   };
 
-  const requireRoom = () => {
+  const requireRoom = (): string => {
     const roomId = socket.data.roomId;
-    if (!roomId || !socket.rooms.has(roomId)) throw new HttpError(409, 'NOT_IN_ROOM', 'Join a room first');
+    if (!roomId || !socket.rooms.has(roomId)) {
+      throw new HttpError(409, ERROR_CODES.NOT_IN_ROOM, 'Join a room first');
+    }
     return roomId;
   };
 
-  const on = (event, handler) => {
-    socket.on(event, async (...args) => {
-      const ack = typeof args[args.length - 1] === 'function' ? args.pop() : undefined;
-      try {
-        await handler(args[0], ack);
-      } catch (err) {
-        if (err instanceof HttpError) {
-          fail(ack, err.code, err.message);
-          return;
+  socket.on(
+    'room:join',
+    guard(socket, 'room:join', async (request, ack) => {
+      const roomId = normalizeRoomId(request?.roomId);
+      if (!roomId) throw new HttpError(404, ERROR_CODES.ROOM_NOT_FOUND, 'Room not found');
+
+      if (socket.data.roomId && socket.data.roomId !== roomId) {
+        await leaveRoom(io, socket);
+      }
+      const alreadyJoined = socket.data.roomId === roomId && socket.rooms.has(roomId);
+
+      const room = await findRoomForSnapshot(roomId);
+      if (!room) throw new HttpError(404, ERROR_CODES.ROOM_NOT_FOUND, 'Room not found');
+
+      if (!alreadyJoined) {
+        const occupants = await io.in(roomId).fetchSockets();
+        if (occupants.length >= maxRoomParticipants) {
+          throw new HttpError(409, ERROR_CODES.ROOM_FULL, `This room already has ${maxRoomParticipants} participants`);
         }
-        console.error(`[socket ${socket.id}] ${event} failed:`, err);
-        fail(ack, 'INTERNAL_ERROR', 'Something went wrong. Please try again.');
-      }
-    });
-  };
 
-  on('room:join', async (payload, ack) => {
-    const roomId = normalizeRoomId(payload && payload.roomId);
-    if (!roomId) throw new HttpError(404, 'ROOM_NOT_FOUND', 'Room not found');
-
-    if (socket.data.roomId && socket.data.roomId !== roomId) {
-      await leaveRoom(io, socket);
-    }
-    const alreadyJoined = socket.data.roomId === roomId && socket.rooms.has(roomId);
-
-    const room = await roomService.findRoomForSnapshot(roomId);
-    if (!room) throw new HttpError(404, 'ROOM_NOT_FOUND', 'Room not found');
-
-    if (!alreadyJoined) {
-      const occupants = await io.in(roomId).fetchSockets();
-      if (occupants.length >= maxRoomParticipants) {
-        throw new HttpError(409, 'ROOM_FULL', `This room already has ${maxRoomParticipants} participants`);
+        socket.data.roomId = roomId;
+        socket.data.muted = !(request?.muted === false);
+        socket.data.joinedAt = Date.now();
+        socket.join(roomId);
       }
 
-      socket.data.roomId = roomId;
-      socket.data.muted = !(payload && payload.muted === false);
-      socket.data.joinedAt = Date.now();
-      socket.join(roomId);
-    }
+      const participants = await listParticipants(io, roomId);
+      if (!alreadyJoined) {
+        socket.to(roomId).emit('presence:update', {
+          participants,
+          event: { type: 'joined', participant: toParticipant(socket.id, socket.data) },
+        });
+      }
 
-    const participants = await listParticipants(io, roomId);
-    if (!alreadyJoined) {
-      socket.to(roomId).emit('presence:update', {
-        participants,
-        event: { type: 'joined', participant: toParticipant(socket.id, socket.data) },
+      reply(ack, {
+        selfId: socket.id,
+        snapshot: {
+          roomId: room.roomId,
+          name: room.name,
+          owner: room.owner,
+          ownerId: String(room.ownerId),
+          participants,
+          messages: (room.messages ?? []).map(toMessageDTO),
+          playback: toPlaybackDTO(room.playback),
+          serverTime: Date.now(),
+        },
       });
-    }
+    })
+  );
 
-    reply(ack, {
-      selfId: socket.id,
-      snapshot: {
-        roomId: room.roomId,
-        name: room.name,
-        owner: room.owner,
-        ownerId: String(room.ownerId),
-        participants,
-        messages: (room.messages || []).map(roomService.toMessageDTO),
-        playback: roomService.toPlaybackDTO(room.playback),
-        serverTime: Date.now(),
-      },
-    });
-  });
+  socket.on(
+    'room:leave',
+    guard(socket, 'room:leave', async (ack) => {
+      await leaveRoom(io, socket);
+      reply(ack);
+    })
+  );
 
-  on('room:leave', async (_payload, ack) => {
-    await leaveRoom(io, socket);
-    reply(ack);
-  });
+  socket.on(
+    'room:mute',
+    guard(socket, 'room:mute', async (request, ack) => {
+      const roomId = requireRoom();
+      socket.data.muted = requireBoolean(request?.muted, 'muted');
 
-  on('room:mute', async (payload, ack) => {
-    const roomId = requireRoom();
-    socket.data.muted = requireBoolean(payload && payload.muted, 'muted');
+      const participants = await listParticipants(io, roomId);
+      io.to(roomId).emit('presence:update', { participants });
+      reply(ack);
+    })
+  );
 
-    const participants = await listParticipants(io, roomId);
-    io.to(roomId).emit('presence:update', { participants });
-    reply(ack);
-  });
+  socket.on(
+    'room:kick',
+    guard(socket, 'room:kick', async (request, ack) => {
+      const roomId = requireRoom();
+      const room = await findRoom(roomId);
+      if (!room) throw new HttpError(404, ERROR_CODES.ROOM_NOT_FOUND, 'This room no longer exists');
+      if (String(room.ownerId) !== socket.data.user.id) {
+        throw new HttpError(403, ERROR_CODES.FORBIDDEN, 'Only the room owner can remove participants');
+      }
 
-  on('room:kick', async (payload, ack) => {
-    const roomId = requireRoom();
-    const room = await roomService.findRoom(roomId);
-    if (!room) throw new HttpError(404, 'ROOM_NOT_FOUND', 'This room no longer exists');
-    if (String(room.ownerId) !== socket.data.user.id) {
-      throw new HttpError(403, 'FORBIDDEN', 'Only the room owner can remove participants');
-    }
+      const targetId = typeof request?.socketId === 'string' ? request.socketId : '';
+      if (!targetId || targetId === socket.id) {
+        throw new HttpError(400, ERROR_CODES.VALIDATION_ERROR, 'Choose another participant to remove');
+      }
 
-    const targetId = payload && typeof payload.socketId === 'string' ? payload.socketId : '';
-    if (!targetId || targetId === socket.id) {
-      throw new HttpError(400, 'VALIDATION_ERROR', 'Choose another participant to remove');
-    }
+      const [target] = await io.in(targetId).fetchSockets();
+      if (!target || !target.rooms.has(roomId)) {
+        throw new HttpError(404, ERROR_CODES.NOT_IN_ROOM, 'That participant is no longer in the room');
+      }
 
-    const [target] = await io.in(targetId).fetchSockets();
-    if (!target || !target.rooms.has(roomId)) {
-      throw new HttpError(404, 'NOT_IN_ROOM', 'That participant is no longer in the room');
-    }
+      const participant = toParticipant(target.id, target.data);
+      io.to(targetId).emit('room:kicked', { roomId });
+      io.in(targetId).socketsLeave(roomId);
 
-    const participant = toParticipant(target.id, target.data);
-    io.to(targetId).emit('room:kicked', { roomId });
-    io.in(targetId).socketsLeave(roomId);
+      const participants = await listParticipants(io, roomId, targetId);
+      io.to(roomId).emit('presence:update', { participants, event: { type: 'left', participant } });
+      reply(ack);
+    })
+  );
 
-    const participants = await listParticipants(io, roomId, targetId);
-    io.to(roomId).emit('presence:update', { participants, event: { type: 'left', participant } });
-    reply(ack);
-  });
+  socket.on(
+    'chat:send',
+    guard(socket, 'chat:send', async (request, ack) => {
+      const roomId = requireRoom();
+      if (!limits.chat.take()) {
+        throw new HttpError(429, ERROR_CODES.RATE_LIMITED, 'You are sending messages too quickly');
+      }
 
-  on('chat:send', async (payload, ack) => {
-    const roomId = requireRoom();
-    if (!limits.chat.take()) {
-      throw new HttpError(429, 'RATE_LIMITED', 'You are sending messages too quickly');
-    }
+      const text = normalizeMessageText(request?.text, LIMITS.maxMessageLength);
+      const message = await appendMessage(roomId, {
+        userId: socket.data.user.id,
+        username: socket.data.user.username,
+        text,
+      });
+      if (!message) throw new HttpError(404, ERROR_CODES.ROOM_NOT_FOUND, 'This room no longer exists');
 
-    const text = normalizeMessageText(payload && payload.text, MAX_MESSAGE_LENGTH);
-    const message = await roomService.appendMessage(roomId, {
-      userId: socket.data.user.id,
-      username: socket.data.user.username,
-      text,
-    });
-    if (!message) throw new HttpError(404, 'ROOM_NOT_FOUND', 'This room no longer exists');
+      const dto = toMessageDTO(message);
+      io.to(roomId).emit('chat:message', dto);
+      reply(ack, { message: dto });
+    })
+  );
 
-    const dto = roomService.toMessageDTO(message);
-    io.to(roomId).emit('chat:message', dto);
-    reply(ack, { message: dto });
-  });
+  socket.on(
+    'playback:set-source',
+    guard(socket, 'playback:set-source', async (request, ack) => {
+      const roomId = requireRoom();
+      if (!limits.playback.take()) {
+        throw new HttpError(429, ERROR_CODES.RATE_LIMITED, 'Too many playback changes. Slow down a little.');
+      }
 
-  on('playback:set-source', async (payload, ack) => {
-    const roomId = requireRoom();
-    if (!limits.playback.take()) {
-      throw new HttpError(429, 'RATE_LIMITED', 'Too many playback changes. Slow down a little.');
-    }
+      const source = parseMediaSource(request?.url);
+      const playback = await updatePlayback(roomId, {
+        source,
+        playing: true,
+        position: source.startAt,
+      });
+      if (!playback) throw new HttpError(404, ERROR_CODES.ROOM_NOT_FOUND, 'This room no longer exists');
 
-    const source = parseMediaSource(payload && payload.url);
-    const playback = await roomService.updatePlayback(roomId, {
-      source,
-      playing: true,
-      position: source.startAt,
-    });
-    if (!playback) throw new HttpError(404, 'ROOM_NOT_FOUND', 'This room no longer exists');
+      const dto = toPlaybackDTO(playback);
+      io.to(roomId).emit('playback:state', dto);
+      reply(ack, { playback: dto });
+    })
+  );
 
-    const dto = roomService.toPlaybackDTO(playback);
-    io.to(roomId).emit('playback:state', dto);
-    reply(ack, { playback: dto });
-  });
+  socket.on(
+    'playback:control',
+    guard(socket, 'playback:control', async (request, ack) => {
+      const roomId = requireRoom();
+      if (!limits.playback.take()) {
+        throw new HttpError(429, ERROR_CODES.RATE_LIMITED, 'Too many playback changes. Slow down a little.');
+      }
 
-  on('playback:control', async (payload, ack) => {
-    const roomId = requireRoom();
-    if (!limits.playback.take()) {
-      throw new HttpError(429, 'RATE_LIMITED', 'Too many playback changes. Slow down a little.');
-    }
+      const playing = requireBoolean(request?.playing, 'playing');
+      const position = requirePosition(request?.position);
+      const playback = await updatePlayback(roomId, { playing, position }, { requireSource: true });
+      if (!playback) throw new HttpError(409, ERROR_CODES.NO_MEDIA, 'Load a video or audio source first');
 
-    const playing = requireBoolean(payload && payload.playing, 'playing');
-    const position = requirePosition(payload && payload.position);
-    const playback = await roomService.updatePlayback(roomId, { playing, position }, { requireSource: true });
-    if (!playback) throw new HttpError(409, 'NO_MEDIA', 'Load a video or audio source first');
-
-    const dto = roomService.toPlaybackDTO(playback);
-    io.to(roomId).emit('playback:state', dto);
-    reply(ack, { playback: dto });
-  });
+      const dto = toPlaybackDTO(playback);
+      io.to(roomId).emit('playback:state', dto);
+      reply(ack, { playback: dto });
+    })
+  );
 
   // WebRTC signalling is relayed only between sockets that share a room. Each sender's relays run
   // one at a time, so a peer receives an offer before the candidates that belong to it.
-  const relaySignal = async (payload) => {
+  const relaySignal = async (request: SignalRequest): Promise<void> => {
     const roomId = socket.data.roomId;
     if (!roomId || !socket.rooms.has(roomId) || !limits.signal.take()) return;
 
-    const to = payload && payload.to;
+    const to = request?.to;
     if (typeof to !== 'string' || to === socket.id) return;
 
-    const description = sanitizeDescription(payload.description);
-    const candidate = sanitizeCandidate(payload.candidate);
+    const description = sanitizeDescription(request.description);
+    const candidate = sanitizeCandidate(request.candidate);
     if (!description && !candidate) return;
 
     const [target] = await io.in(to).fetchSockets();
@@ -265,16 +338,14 @@ function registerRoomHandlers(io, socket, { maxRoomParticipants }) {
     io.to(to).emit('rtc:signal', { from: socket.id, description, candidate });
   };
 
-  let signalChain = Promise.resolve();
-  socket.on('rtc:signal', (payload) => {
+  let signalChain: Promise<void> = Promise.resolve();
+  socket.on('rtc:signal', (request) => {
     signalChain = signalChain
-      .then(() => relaySignal(payload))
-      .catch((err) => console.error(`[socket ${socket.id}] rtc:signal failed:`, err));
+      .then(() => relaySignal(request))
+      .catch((err: unknown) => console.error(`[socket ${socket.id}] rtc:signal failed:`, err));
   });
 
   socket.on('disconnecting', () => {
-    leaveRoom(io, socket).catch((err) => console.error(`[socket ${socket.id}] leave failed:`, err));
+    leaveRoom(io, socket).catch((err: unknown) => console.error(`[socket ${socket.id}] leave failed:`, err));
   });
 }
-
-module.exports = { registerRoomHandlers, listParticipants };
