@@ -21,7 +21,6 @@ import { useWatchTogether } from '../hooks/useWatchTogether';
 import { getErrorMessage, roomApi } from '../lib/api';
 import { rememberRoom } from '../lib/recentRooms';
 import { SocketRequestError } from '../lib/socket';
-import type { DeckSettings } from '../lib/deckSettings';
 import type { Participant } from '../types';
 
 type Tab = 'chat' | 'people' | 'audio';
@@ -352,7 +351,7 @@ function RoomView({ roomId }: { roomId: string }) {
           )}
           {tab === 'audio' && (
             <AudioDeck
-              settings={deck.settings as DeckSettings}
+              settings={deck.settings}
               onUpdate={deck.update}
               onReset={deck.reset}
               inputs={devices.inputs}
