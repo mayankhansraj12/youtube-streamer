@@ -1,99 +1,126 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import { useAuth } from '../context/AuthContext';
-import { FaVideo } from 'react-icons/fa';
+import { useState, type FormEvent } from 'react';
+import { FaEye, FaEyeSlash } from 'react-icons/fa';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import AuthLayout from '../components/AuthLayout';
+import FormField from '../components/FormField';
+import { LIMITS } from '../config';
+import { useAuth } from '../context/authState';
+import { authApi, getErrorMessage } from '../lib/api';
+import { inputClass, primaryButtonClass } from '../lib/formStyles';
 
-const Signup = () => {
-    const [username, setUsername] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
-    const { login } = useAuth();
-    const navigate = useNavigate();
+export default function Signup() {
+  const { login, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError('');
-        try {
-            const SERVER_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-            const res = await axios.post(`${SERVER_URL}/api/auth/signup`, { username, email, password });
-            login(res.data.token, res.data.user);
-            navigate('/');
-        } catch (err: any) {
-            console.error("Signup Error:", err);
-            const msg = err.response?.data?.msg || err.message || 'Signup failed';
-            setError(msg);
-        }
-    };
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-    return (
-        <div className="min-h-screen bg-brand-black flex flex-col items-center justify-center p-4 relative overflow-hidden font-sans">
-            {/* Background Effects */}
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-                <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-brand-cyan/5 rounded-full blur-[100px]"></div>
-                <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-brand-purple/5 rounded-full blur-[100px]"></div>
-            </div>
+  if (isAuthenticated) return <Navigate to="/" replace />;
 
-            <div className="w-full max-w-md bg-brand-surface/60 backdrop-blur-xl p-8 rounded-3xl border border-white/5 shadow-glass relative z-10">
-                <div className="flex justify-center mb-8">
-                    <div className="bg-gradient-to-tr from-brand-cyan to-brand-purple p-0.5 rounded-2xl shadow-glow-cyan">
-                        <div className="bg-brand-black p-3 rounded-2xl">
-                            <FaVideo className="text-white text-2xl" />
-                        </div>
-                    </div>
-                </div>
-                <h2 className="text-3xl font-bold text-brand-text text-center mb-2 tracking-tight">Access Granted</h2>
-                <p className="text-brand-dim text-center mb-8 text-sm uppercase tracking-widest">Initialise New User</p>
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await authApi.signup({
+        username: username.trim(),
+        email: email.trim() || undefined,
+        password,
+      });
+      login(session);
+      navigate('/', { replace: true });
+    } catch (caught) {
+      setError(getErrorMessage(caught, 'Account creation failed. Please try again.'));
+      setBusy(false);
+    }
+  };
 
-                {error && <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-3 rounded-lg mb-6 text-sm text-center">{error}</div>}
+  return (
+    <AuthLayout
+      title="Create your account"
+      subtitle="Start watching together"
+      error={error}
+      footer={
+        <>
+          Already have an account?{' '}
+          <Link to="/login" className="font-medium text-brand-text transition hover:text-brand-cyan">
+            Sign in
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={submit} className="space-y-5">
+        <FormField
+          id="signup-username"
+          label="Username"
+          hint="3 to 24 characters: letters, numbers, underscores, dots, or hyphens."
+        >
+          <input
+            id="signup-username"
+            name="username"
+            type="text"
+            autoComplete="username"
+            required
+            minLength={3}
+            maxLength={24}
+            pattern="[A-Za-z0-9_.\-]{3,24}"
+            aria-describedby="signup-username-hint"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="your_name"
+            className={inputClass}
+          />
+        </FormField>
 
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-xs font-semibold text-brand-dim uppercase tracking-wider mb-2 ml-1">Username</label>
-                        <input
-                            type="text"
-                            className="w-full bg-brand-black/50 border border-white/5 rounded-xl px-4 py-3 text-brand-text focus:outline-none focus:border-brand-cyan/50 focus:ring-1 focus:ring-brand-cyan/50 transition-all placeholder-brand-dim/30"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            placeholder="CODENAME"
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-brand-dim uppercase tracking-wider mb-2 ml-1">Email (Optional)</label>
-                        <input
-                            type="email"
-                            className="w-full bg-brand-black/50 border border-white/5 rounded-xl px-4 py-3 text-brand-text focus:outline-none focus:border-brand-cyan/50 focus:ring-1 focus:ring-brand-cyan/50 transition-all placeholder-brand-dim/30"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            placeholder="email@example.com"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-brand-dim uppercase tracking-wider mb-2 ml-1">Password</label>
-                        <input
-                            type="password"
-                            className="w-full bg-brand-black/50 border border-white/5 rounded-xl px-4 py-3 text-brand-text focus:outline-none focus:border-brand-purple/50 focus:ring-1 focus:ring-brand-purple/50 transition-all placeholder-brand-dim/30"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="••••••••"
-                            required
-                            minLength={6}
-                        />
-                    </div>
+        <FormField id="signup-email" label="Email (optional)" hint="Lets you sign in with your email as well as your username.">
+          <input
+            id="signup-email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            maxLength={254}
+            aria-describedby="signup-email-hint"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+            className={inputClass}
+          />
+        </FormField>
 
-                    <button type="submit" className="w-full bg-white text-black font-bold py-3.5 rounded-xl hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-[0.98] mt-2">
-                        Sign Up
-                    </button>
-                </form>
+        <FormField id="signup-password" label="Password" hint={`At least ${LIMITS.minPasswordLength} characters.`}>
+          <div className="relative">
+            <input
+              id="signup-password"
+              name="password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              required
+              minLength={LIMITS.minPasswordLength}
+              aria-describedby="signup-password-hint"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Create a password"
+              className={`${inputClass} pr-12`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((value) => !value)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-2 text-white/50 transition hover:text-white"
+            >
+              {showPassword ? <FaEyeSlash size={14} aria-hidden="true" /> : <FaEye size={14} aria-hidden="true" />}
+            </button>
+          </div>
+        </FormField>
 
-                <p className="mt-8 text-center text-brand-dim text-sm">
-                    Already have an account? <Link to="/login" className="text-brand-text hover:text-brand-cyan transition-colors font-medium">Log in</Link>
-                </p>
-            </div>
-        </div>
-    );
-};
-
-export default Signup;
+        <button type="submit" disabled={busy} className={primaryButtonClass}>
+          {busy ? 'Creating account…' : 'Create account'}
+        </button>
+      </form>
+    </AuthLayout>
+  );
+}
