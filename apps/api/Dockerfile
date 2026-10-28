@@ -3,8 +3,8 @@
 # The build context is the repository root, so the whole workspace installs from its lockfile.
 #
 # Build stage: compile the shared contract and the API, then write a production-only copy of the
-# API package to /app. pnpm links dependencies with absolute paths, so the copy is made at the
-# same path the runtime stage uses.
+# API package to /app. The copy is self-contained (pnpm links dependencies with relative paths),
+# so the runtime stage takes it as it is.
 FROM node:22-alpine AS build
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /repo
