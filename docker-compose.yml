@@ -1,25 +1,43 @@
-version: '3.8'
+name: streamsync
 
 services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   server:
-    build: 
+    build:
       context: ./server
-      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      MONGODB_URI: mongodb://mongo:27017/streamsync
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in a .env file or the shell environment}
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:8080}
     ports:
       - "5000:5000"
-    environment:
-      - PORT=5000
-      # Add other env vars here or use .env file
-      # - MONGODB_URI=...
-      # - JWT_SECRET=...
+    depends_on:
+      mongo:
+        condition: service_healthy
 
   client:
     build:
       context: ./client
-      dockerfile: Dockerfile
       args:
-        - VITE_BACKEND_URL=http://localhost:5000
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:5000}
+    restart: unless-stopped
     ports:
       - "8080:80"
     depends_on:
       - server
+
+volumes:
+  mongo-data:
