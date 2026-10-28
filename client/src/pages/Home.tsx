@@ -1,12 +1,19 @@
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaYoutube, FaMagic, FaPlay } from 'react-icons/fa';
+import { FaYoutube, FaMagic, FaPlay, FaSignOutAlt } from 'react-icons/fa';
+import { useAuth } from '../context/AuthContext';
 
 const Home: React.FC = () => {
+    const { user, logout } = useAuth();
     const [roomId, setRoomId] = useState('');
-    const [username, setUsername] = useState('');
+    const [username, setUsername] = useState(user?.username || '');
+    const [roomNameInput, setRoomNameInput] = useState('');
     const navigate = useNavigate();
+
+    useEffect(() => {
+        if (user?.username) setUsername(user.username);
+    }, [user]);
 
     const handleJoin = () => {
         if (!roomId || !username) return;
@@ -17,45 +24,65 @@ const Home: React.FC = () => {
         if (!username) return;
         // Generate a 6-character room ID (random alphanumeric)
         const newRoomId = Math.random().toString(36).substring(2, 8);
-        navigate(`/room/${newRoomId}`, { state: { username, create: true } });
+        navigate(`/room/${newRoomId}`, { state: { username, roomName: roomNameInput, create: true } });
+    };
+
+    const handleLogout = () => {
+        logout();
+        navigate('/login');
     };
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-[#0f0f0f] text-white p-4 relative overflow-hidden">
+        <div className="flex flex-col items-center justify-center min-h-screen bg-brand-black text-brand-text p-4 relative overflow-hidden font-sans">
             {/* Background Effects */}
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
-                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl animate-pulse"></div>
-                <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-pink-600/20 rounded-full blur-3xl animate-pulse delay-700"></div>
+            <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
+                <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-brand-cyan/5 rounded-full blur-[120px]"></div>
+                <div className="absolute bottom-1/4 right-1/4 w-[600px] h-[600px] bg-brand-purple/5 rounded-full blur-[120px]"></div>
+                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03]"></div>
             </div>
 
+            {/* Logout Button */}
+            <button
+                onClick={handleLogout}
+                className="absolute top-6 right-6 z-50 flex items-center gap-2 bg-brand-surface/80 hover:bg-white/10 text-brand-text/80 hover:text-white px-4 py-2 rounded-full transition-all border border-white/5 hover:border-white/10 shadow-glass backdrop-blur-md"
+            >
+                <FaSignOutAlt className="text-sm" />
+                <span className="text-xs font-semibold tracking-wide">LOGOUT</span>
+            </button>
+
             <div className="z-10 w-full max-w-md">
-                <div className="text-center mb-8 lg:mb-10">
-                    <div className="inline-flex items-center justify-center w-16 h-16 lg:w-20 lg:h-20 bg-gradient-to-br from-purple-600 to-pink-600 rounded-2xl shadow-2xl shadow-purple-500/30 mb-4 lg:mb-6 transform rotate-3 hover:rotate-6 transition-transform">
-                        <FaYoutube className="text-3xl lg:text-4xl text-white" />
+                <div className="text-center mb-10 lg:mb-12">
+                    <div className="inline-flex items-center justify-center w-20 h-20 mb-6 relative group">
+                        <div className="absolute inset-0 bg-gradient-to-tr from-brand-cyan to-brand-purple rounded-3xl rotate-6 opacity-50 group-hover:rotate-12 transition-transform duration-500 blur-xl"></div>
+                        <div className="relative bg-brand-surface/90 p-5 rounded-2xl border border-white/10 shadow-2xl">
+                            <FaYoutube className="text-4xl text-white" />
+                        </div>
                     </div>
-                    <h1 className="text-4xl lg:text-5xl font-extrabold tracking-tight mb-2 bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
-                        Stream<span className="text-purple-500">Sync</span>
+
+                    <h1 className="text-5xl lg:text-6xl font-extrabold tracking-tight mb-3 text-white">
+                        Stream<span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-cyan to-brand-purple">Sync</span>
                     </h1>
-                    <p className="text-gray-400 font-medium text-sm lg:text-base">Watch together, wherever you are.</p>
+                    <p className="text-brand-dim font-medium tracking-wide text-sm">Next-Gen Synchronized Viewing</p>
                 </div>
 
-                <div className="bg-[#1a1a1a]/80 backdrop-blur-xl p-6 lg:p-8 rounded-3xl shadow-2xl border border-white/10 ring-1 ring-white/5">
+                <div className="bg-brand-surface/60 backdrop-blur-2xl p-8 rounded-3xl shadow-glass border border-white/5 relative overflow-hidden">
+
                     <div className="space-y-6">
                         <div>
-                            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 ml-1">Display Name</label>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-dim mb-2 ml-1">Display Name</label>
                             <input
                                 type="text"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
-                                className="w-full p-4 bg-[#0a0a0a] border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all text-white placeholder-gray-600"
-                                placeholder="Enter your nickname"
+                                className="w-full p-4 bg-brand-black/50 border border-white/5 rounded-2xl focus:outline-none focus:border-brand-cyan/50 focus:ring-1 focus:ring-brand-cyan/50 transition-all text-brand-text placeholder-brand-dim/50 font-medium text-sm"
+                                placeholder="Enter your name"
                             />
                         </div>
 
                         <div className="relative flex py-2 items-center">
-                            <div className="flex-grow border-t border-white/10"></div>
-                            <span className="flex-shrink-0 mx-4 text-xs text-gray-500 uppercase tracking-widest font-semibold">Join Room</span>
-                            <div className="flex-grow border-t border-white/10"></div>
+                            <div className="flex-grow border-t border-white/5"></div>
+                            <span className="flex-shrink-0 mx-4 text-[10px] text-brand-dim uppercase tracking-widest font-bold opacity-60">Join Room</span>
+                            <div className="flex-grow border-t border-white/5"></div>
                         </div>
 
                         <div className="flex gap-3">
@@ -63,22 +90,32 @@ const Home: React.FC = () => {
                                 type="text"
                                 value={roomId}
                                 onChange={(e) => setRoomId(e.target.value)}
-                                className="flex-1 p-4 bg-[#0a0a0a] border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all text-white placeholder-gray-600"
-                                placeholder="Room Code"
+                                className="flex-1 p-4 bg-brand-black/50 border border-white/5 rounded-2xl focus:outline-none focus:border-brand-cyan/50 focus:ring-1 focus:ring-brand-cyan/50 transition-all text-brand-text placeholder-brand-dim/50 font-medium text-sm"
+                                placeholder="Enter Room Code"
                             />
                             <button
                                 onClick={handleJoin}
                                 disabled={!roomId || !username}
-                                className="bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 rounded-xl font-semibold transition-all border border-white/10 active:scale-95"
+                                className="bg-brand-cyan/10 hover:bg-brand-cyan/20 disabled:opacity-30 disabled:cursor-not-allowed text-brand-cyan border border-brand-cyan/30 px-6 rounded-2xl font-bold transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
                             >
                                 <FaPlay />
                             </button>
                         </div>
 
+                        <div className="flex gap-3 mb-6">
+                            <input
+                                type="text"
+                                value={roomNameInput}
+                                onChange={(e) => setRoomNameInput(e.target.value)}
+                                className="flex-1 p-4 bg-brand-black/50 border border-white/5 rounded-2xl focus:outline-none focus:border-brand-purple/50 focus:ring-1 focus:ring-brand-purple/50 transition-all text-brand-text placeholder-brand-dim/50 font-medium text-sm"
+                                placeholder="New Room Name (Optional)"
+                            />
+                        </div>
+
                         <button
                             onClick={handleCreate}
-                            disabled={!username}
-                            className="w-full group bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 disabled:cursor-not-allowed text-white p-4 rounded-xl font-bold shadow-lg shadow-purple-900/30 transform hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+                            disabled={!username || !roomNameInput.trim()}
+                            className="w-full group bg-gradient-to-r from-brand-cyan to-brand-purple hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-white p-4 rounded-2xl font-bold shadow-lg shadow-brand-purple/20 transform hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 text-sm tracking-wide"
                         >
                             <FaMagic className="group-hover:rotate-12 transition-transform" />
                             Create New Space
@@ -86,9 +123,11 @@ const Home: React.FC = () => {
                     </div>
                 </div>
 
-                <p className="text-center text-xs text-gray-600 mt-8">
-                    &copy; 2024 StreamSync. High Fidelity Audio & Video.
-                </p>
+                <div className="text-center mt-8 opacity-40 hover:opacity-100 transition-opacity">
+                    <p className="text-[10px] text-brand-text uppercase tracking-widest font-semibold flex items-center justify-center gap-2">
+                        StreamSync <span className="w-1 h-1 bg-brand-text rounded-full"></span> 2024
+                    </p>
+                </div>
             </div>
         </div>
     );
