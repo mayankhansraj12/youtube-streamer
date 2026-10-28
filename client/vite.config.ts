@@ -1,19 +1,16 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [
-    react(),
-    nodePolyfills(),
-  ],
-  resolve: {
-    alias: {
-      // process: "process/browser",
-      // stream: "stream-browserify",
-      // zlib: "browserify-zlib",
-      // util: "util",
-    }
-  }
-})
+  plugins: [react()],
+  build: {
+    // The hls.js chunk is loaded only when an HLS stream is played, so its size is expected.
+    chunkSizeWarningLimit: 650,
+  },
+  server: {
+    port: 5173,
+  },
+  preview: {
+    port: 4173,
+  },
+});
